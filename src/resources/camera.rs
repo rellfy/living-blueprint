@@ -1,5 +1,5 @@
 use derive_getters::Getters;
-use glam::Vec2;
+use vello::kurbo::Vec2;
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 20.0;
