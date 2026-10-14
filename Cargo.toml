@@ -9,6 +9,7 @@ publish = false
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 derive-getters = "0.5.0"
 env_logger = "0.11"
+fontique = { version = "0.12", default-features = false, features = ["fontconfig-dlopen"] }
 notify = "8"
 parley = "0.12"
 pollster = "0.4"
@@ -27,3 +28,9 @@ winit = "0.30.8"
 
 [profile.release]
 codegen-units = 1
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

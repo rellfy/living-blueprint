@@ -1291,6 +1291,7 @@ dependencies = [
  "arboard",
  "derive-getters",
  "env_logger",
+ "fontique",
  "notify",
  "parley",
  "pollster",
