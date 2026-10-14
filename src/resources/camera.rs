@@ -3,8 +3,8 @@ use vello::kurbo::{Affine, Point, Rect, Size, Vec2};
 const MIN_ZOOM: f64 = 0.0002;
 const MAX_ZOOM: f64 = 6.0;
 const SMOOTHING_RATE: f64 = 16.0;
-const INERTIA_DECAY_RATE: f64 = 5.0;
-const MIN_INERTIA_SPEED: f64 = 1.0;
+const INERTIA_DECAY_RATE: f64 = 7.0;
+const MIN_INERTIA_SPEED: f64 = 8.0;
 const SETTLED_ZOOM_RATIO: f64 = 0.0005;
 const FIT_MARGIN_RATIO: f64 = 0.88;
 

@@ -91,7 +91,8 @@ fn insert_text(state: &mut State, text: Option<&str>) {
 
 fn handle_release(state: &mut State) {
     match state.pointer.release() {
-        PointerRelease::Click(position) => focus_at(state, position),
+        PointerRelease::DoubleClick(position) => focus_at(state, position),
+        PointerRelease::Click => {}
         PointerRelease::Drag(velocity) => state.camera.release_with_velocity(velocity),
         PointerRelease::None => {}
     }
