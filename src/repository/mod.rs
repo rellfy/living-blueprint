@@ -228,3 +228,41 @@ fn root_name(root: &Path) -> String {
         false => file_name(root),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::repository::layout::CODE_FONT_SIZE;
+    use crate::repository::{NodeKind, Repository};
+    use std::path::Path;
+
+    #[test]
+    fn loads_own_repository_with_nested_layout() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        let main_id = repository.find_by_path(Path::new("src/main.rs")).unwrap();
+        let main = repository.node(main_id);
+        assert!(matches!(main.kind, NodeKind::File(_)));
+        assert!(repository.bounds().contains(main.rect.center()));
+        let parent = repository.node(main.parent.unwrap());
+        assert!(parent.rect.contains(main.rect.origin()));
+        assert_eq!(repository.hit_test(main.rect.center()), Some(main_id));
+        assert!(!repository.edges().is_empty());
+    }
+
+    #[test]
+    fn siblings_do_not_overlap() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        for node in repository.nodes() {
+            for (index, first) in node.children.iter().enumerate() {
+                for second in &node.children[index + 1..] {
+                    let overlap = repository
+                        .node(*first)
+                        .rect
+                        .intersect(repository.node(*second).rect);
+                    assert!(overlap.area() <= 0.0);
+                }
+            }
+        }
+    }
+}

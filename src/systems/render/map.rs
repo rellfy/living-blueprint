@@ -14,8 +14,8 @@ const MIN_NODE_SCREEN_SIZE: f64 = 2.0;
 const NODE_STROKE_PX: f64 = 1.25;
 const CORNER_RADIUS_PX: f64 = 6.0;
 const DIRECTORY_FILL: Color = Color::from_rgba8(255, 255, 255, 7);
-const FILE_FILL: Color = Color::from_rgba8(255, 255, 255, 14);
-const FILE_FILL_HOVERED: Color = Color::from_rgba8(255, 255, 255, 30);
+const FILE_FILL: Color = Color::from_rgba8(17, 52, 102, 225);
+const FILE_FILL_HOVERED: Color = Color::from_rgba8(27, 68, 126, 235);
 const CODE_FADE_START_PX: f64 = 5.0;
 const CODE_FADE_END_PX: f64 = 9.0;
 const BARS_FADE_START_PX: f64 = 0.3;
@@ -24,6 +24,8 @@ const DIRECTORY_LABEL_RATIO: f64 = 0.5;
 const FILE_HEADER_LABEL_SIZE: f64 = 16.0;
 const MIN_LABEL_PX: f64 = 4.5;
 const MAX_DIRECTORY_LABEL_PX: f64 = 30.0;
+const MIN_DIRECTORY_LABEL_PX: f64 = 12.0;
+const LABEL_CHARACTER_WIDTH_RATIO: f64 = 0.6;
 const MAX_TILE_LABEL_PX: f64 = 24.0;
 const DEFINITION_LABEL_PX: f64 = 11.0;
 const MIN_DEFINITION_SPACING_PX: f64 = 14.0;
@@ -72,10 +74,10 @@ impl MapPainter<'_> {
         };
         self.draw_box(node.rect, DIRECTORY_FILL, stroke_color);
         self.draw_separator(node.rect, node.header_height, 0.25);
-        self.draw_directory_label(node);
         for child in &node.children {
             self.draw_node(*child);
         }
+        self.draw_directory_label(node);
     }
 
     fn draw_file(&mut self, id: NodeId, node: &Node) {
@@ -92,8 +94,9 @@ impl MapPainter<'_> {
         self.draw_separator(node.rect, FILE_HEADER_HEIGHT, 0.3 * code_alpha as f32);
         self.draw_line_bars(id, node, bars_alpha);
         self.draw_code(id, node, code_alpha);
-        self.draw_definitions(node, bars_alpha);
-        self.draw_file_labels(node, code_alpha);
+        self.draw_header_label(node, code_alpha);
+        let tile_label_bottom = self.draw_tile_label(node, 1.0 - code_alpha);
+        self.draw_definitions(node, bars_alpha, tile_label_bottom);
     }
 
     fn draw_box(&mut self, rect: Rect, fill: Color, stroke: Color) {
@@ -174,7 +177,7 @@ impl MapPainter<'_> {
         self.scene.pop_layer();
     }
 
-    fn draw_definitions(&mut self, node: &Node, alpha: f64) {
+    fn draw_definitions(&mut self, node: &Node, alpha: f64, min_world_y: f64) {
         let zoom = self.frame.zoom;
         if alpha <= 0.2 || node.rect.width() * zoom < MIN_DEFINITION_FILE_WIDTH_PX {
             return;
@@ -194,7 +197,7 @@ impl MapPainter<'_> {
             if screen_y - last_screen_y < MIN_DEFINITION_SPACING_PX * self.frame.scale_factor {
                 continue;
             }
-            if world_y < self.frame.visible.y0 || world_y > self.frame.visible.y1 {
+            if world_y < self.frame.visible.y0.max(min_world_y) || world_y > self.frame.visible.y1 {
                 continue;
             }
             last_screen_y = screen_y;
@@ -215,14 +218,24 @@ impl MapPainter<'_> {
     }
 
     fn draw_directory_label(&mut self, node: &Node) {
-        let world_size = node.header_height * DIRECTORY_LABEL_RATIO;
-        let world_size = cap_world_size(world_size, MAX_DIRECTORY_LABEL_PX, self.frame);
+        let label = directory_label(node);
+        let character_count = label.chars().count().max(1) as f64;
+        let min_world_size = MIN_DIRECTORY_LABEL_PX * self.frame.scale_factor / self.frame.zoom;
+        let preferred_size = (node.header_height * DIRECTORY_LABEL_RATIO).max(min_world_size);
+        let fitting_size =
+            node.rect.width() * 0.9 / (character_count * LABEL_CHARACTER_WIDTH_RATIO);
+        let world_size = cap_world_size(
+            preferred_size.min(fitting_size),
+            MAX_DIRECTORY_LABEL_PX,
+            self.frame,
+        );
+        let inset = node.header_height * 0.45;
         let origin = Point::new(
-            node.rect.x0 + node.header_height * 0.45,
-            node.rect.y0 + (node.header_height - world_size * 1.2) * 0.5,
+            node.rect.x0 + inset,
+            node.rect.y0 + ((node.header_height - world_size * 1.2) * 0.5).max(inset * 0.3),
         );
         self.draw_label(
-            &directory_label(node),
+            &label,
             LabelPlacement {
                 origin,
                 world_size,
@@ -233,7 +246,7 @@ impl MapPainter<'_> {
         );
     }
 
-    fn draw_file_labels(&mut self, node: &Node, code_alpha: f64) {
+    fn draw_header_label(&mut self, node: &Node, alpha: f64) {
         self.draw_label(
             &node.name,
             LabelPlacement {
@@ -242,21 +255,21 @@ impl MapPainter<'_> {
                     node.rect.y0 + (FILE_HEADER_HEIGHT - FILE_HEADER_LABEL_SIZE * 1.2) * 0.5,
                 ),
                 world_size: FILE_HEADER_LABEL_SIZE,
-                alpha: code_alpha as f32,
+                alpha: alpha as f32,
                 color: INK,
                 weight: 600.0,
             },
         );
-        self.draw_tile_label(node, 1.0 - code_alpha);
     }
 
-    fn draw_tile_label(&mut self, node: &Node, alpha: f64) {
-        if alpha <= 0.01 {
-            return;
-        }
+    fn draw_tile_label(&mut self, node: &Node, alpha: f64) -> f64 {
         let rect = node.rect;
+        if alpha <= 0.01 {
+            return rect.y0;
+        }
         let character_count = node.name.chars().count().max(1) as f64;
-        let fitted_size = (rect.width() * 0.85 / (character_count * 0.6)).min(rect.height() * 0.3);
+        let fitted_size = (rect.width() * 0.85 / (character_count * LABEL_CHARACTER_WIDTH_RATIO))
+            .min(rect.height() * 0.3);
         let world_size = cap_world_size(fitted_size, MAX_TILE_LABEL_PX, self.frame);
         let layout = self
             .cache
@@ -278,6 +291,7 @@ impl MapPainter<'_> {
                 weight: 600.0,
             },
         );
+        origin.y + label_size.y
     }
 
     fn draw_label(&mut self, text: &str, placement: LabelPlacement) {

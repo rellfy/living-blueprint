@@ -11,6 +11,14 @@ const MAX_FILE_BYTES: usize = 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8000;
 const TAB_REPLACEMENT: &str = "    ";
 const SKIPPED_DIRECTORY_NAMES: [&str; 3] = ["target", "node_modules", ".git"];
+const MAX_EXPANDED_LINES: usize = 4000;
+const COLLAPSED_FILE_NAMES: [&str; 5] = [
+    "Cargo.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+];
 
 pub struct LoadedFile {
     pub path: PathBuf,
@@ -49,7 +57,7 @@ fn load_chunk(root: &Path, paths: &[PathBuf]) -> Vec<LoadedFile> {
 
 fn load_file(root: &Path, path: &Path) -> Option<LoadedFile> {
     let bytes = fs::read(root.join(path)).ok()?;
-    let text = decode_text(&bytes);
+    let text = decode_text(&bytes).filter(|text| !check_is_collapsed(path, text));
     let line_spans = text.as_deref().map(measure_lines).unwrap_or_default();
     let analysis = text.as_deref().and_then(|text| analyse(path, text));
     Some(LoadedFile {
@@ -68,6 +76,11 @@ fn decode_text(bytes: &[u8]) -> Option<String> {
     }
     let text = String::from_utf8_lossy(bytes);
     Some(text.replace('\r', "").replace('\t', TAB_REPLACEMENT))
+}
+
+fn check_is_collapsed(path: &Path, text: &str) -> bool {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    COLLAPSED_FILE_NAMES.contains(&name.as_ref()) || text.lines().count() > MAX_EXPANDED_LINES
 }
 
 fn check_is_binary(bytes: &[u8]) -> bool {

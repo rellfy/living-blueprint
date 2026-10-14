@@ -1,6 +1,7 @@
+use crate::repository::layout::LINE_HEIGHT;
 use crate::repository::{Edge, NodeId, Repository};
 use crate::systems::render::palette::{ACCENT, INK};
-use crate::systems::render::{FrameContext, check_overlaps};
+use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
 use vello::Scene;
 use vello::kurbo::{BezPath, Circle, Point, Rect, Shape, Stroke};
 use vello::peniko::Fill;
@@ -12,6 +13,8 @@ const DIMMED_ALPHA: f32 = 0.035;
 const HIGHLIGHT_ALPHA: f32 = 0.9;
 const ENDPOINT_RADIUS_PX: f64 = 3.0;
 const CONTROL_RATIO: f64 = 0.45;
+const CODE_FADE_START_PX: f64 = 4.0;
+const CODE_FADE_END_PX: f64 = 8.0;
 
 pub fn draw_edges(
     scene: &mut Scene,
@@ -43,10 +46,15 @@ pub fn draw_edges(
             endpoints.extend(Circle::new(end, endpoint_radius).path_elements(0.1));
         }
     }
+    let code_visibility = smoothstep(
+        CODE_FADE_START_PX,
+        CODE_FADE_END_PX,
+        LINE_HEIGHT * frame.zoom,
+    ) as f32;
     let ambient_alpha = match hovered.is_some() {
         true => DIMMED_ALPHA,
         false => AMBIENT_ALPHA,
-    };
+    } * (1.0 - code_visibility);
     let stroke_scale = frame.scale_factor / frame.zoom;
     scene.stroke(
         &Stroke::new(EDGE_STROKE_PX * stroke_scale),

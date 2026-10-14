@@ -147,3 +147,169 @@ fn acquire_surface_texture(state: &mut State) -> Option<SurfaceTexture> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repository::Repository;
+    use crate::resources::camera::Camera;
+    use crate::resources::text::TextEngine;
+    use crate::systems::render::cache::RenderCache;
+    use std::num::NonZeroUsize;
+    use std::path::Path;
+    use vello::kurbo::{Point, Size};
+    use vello::{AaSupport, Renderer, RendererOptions, Scene};
+    use wgpu::{
+        BackendOptions, Backends, DeviceDescriptor, Extent3d, Instance, InstanceDescriptor,
+        InstanceFlags, MemoryBudgetThresholds, RequestAdapterOptions, TextureDescriptor,
+        TextureDimension, TextureFormat, TextureUsages,
+    };
+
+    #[test]
+    #[ignore = "requires a GPU"]
+    fn renders_repository_offscreen_at_several_zoom_levels() {
+        let instance = Instance::new(InstanceDescriptor {
+            display: None,
+            backends: Backends::PRIMARY,
+            flags: InstanceFlags::default(),
+            memory_budget_thresholds: MemoryBudgetThresholds::default(),
+            backend_options: BackendOptions::default(),
+        });
+        let adapter =
+            pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
+                .unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
+        let mut renderer = Renderer::new(
+            &device,
+            RendererOptions {
+                use_cpu: false,
+                antialiasing_support: AaSupport::area_only(),
+                num_init_threads: NonZeroUsize::new(1),
+                pipeline_cache: None,
+            },
+        )
+        .unwrap();
+        let viewport = Size::new(1280.0, 800.0);
+        let texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: 1280,
+                height: 800,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
+            format: TextureFormat::Rgba8Unorm,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let mut text_engine = TextEngine::new();
+        let repository = Repository::load(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            text_engine.char_advance(),
+        )
+        .unwrap();
+        let main_rect = repository
+            .node(repository.find_by_path(Path::new("src/main.rs")).unwrap())
+            .rect;
+        let mut cache = RenderCache::default();
+        let mut camera = Camera::new();
+        for (index, (rect, zoom_factor)) in [
+            (repository.bounds(), 1.0),
+            (main_rect, 1.0),
+            (main_rect, 0.15),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            camera.jump_to(rect, viewport);
+            camera.zoom_at(Point::new(640.0, 400.0), zoom_factor, viewport);
+            for _ in 0..60 {
+                camera.update(1.0 / 60.0, viewport);
+            }
+            let frame = FrameContext {
+                viewport,
+                transform: camera.transform(viewport),
+                zoom: camera.zoom(),
+                visible: camera.visible_world_rect(viewport),
+                scale_factor: 1.0,
+                elapsed_seconds: 0.0,
+            };
+            let mut scene = Scene::new();
+            cache.begin_frame();
+            draw_background(&mut scene, &frame);
+            MapPainter {
+                scene: &mut scene,
+                cache: &mut cache,
+                text_engine: &mut text_engine,
+                repository: &repository,
+                frame: &frame,
+                hovered: Some(repository.root_id()),
+            }
+            .draw();
+            draw_edges(&mut scene, &repository, &frame, None);
+            let params = RenderParams {
+                base_color: BACKGROUND,
+                width: 1280,
+                height: 800,
+                antialiasing_method: AaConfig::Area,
+            };
+            renderer
+                .render_to_texture(&device, &queue, &scene, &view, &params)
+                .unwrap();
+            if let Ok(directory) = std::env::var("LIVING_BLUEPRINT_SNAPSHOT_DIR") {
+                write_snapshot(
+                    &device,
+                    &queue,
+                    &texture,
+                    &format!("{directory}/snapshot_{index}.ppm"),
+                );
+            }
+        }
+    }
+
+    fn write_snapshot(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture: &wgpu::Texture,
+        path: &str,
+    ) {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 1280 * 800 * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(1280 * 4),
+                    rows_per_image: None,
+                },
+            },
+            Extent3d {
+                width: 1280,
+                height: 800,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let pixels = buffer.slice(..).get_mapped_range().unwrap();
+        let mut bytes = b"P6\n1280 800\n255\n".to_vec();
+        for pixel in pixels.chunks(4) {
+            bytes.extend_from_slice(&pixel[..3]);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+}
