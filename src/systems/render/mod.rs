@@ -253,6 +253,23 @@ mod tests {
             }
             .draw();
             draw_edges(&mut scene, &repository, &frame, None);
+            let mut prompt = crate::resources::prompt::Prompt::new();
+            prompt.insert("explain how the semantic zoom levels are chosen");
+            prompt.visibility = 1.0;
+            let mut session = crate::resources::agent_session::AgentSession::new();
+            session.status = crate::resources::agent_session::AgentStatus::Working;
+            session.last_message = Some("Read src/systems/render/map.rs".to_string());
+            session.status_visibility = 1.0;
+            session.orb.visibility = 1.0;
+            session.orb.position = main_rect.center();
+            draw_orb(&mut scene, &session.orb, &frame);
+            let mut overlay = OverlayPainter {
+                scene: &mut scene,
+                text_engine: &mut text_engine,
+                frame: &frame,
+            };
+            overlay.draw_status(&session);
+            overlay.draw_prompt(&prompt);
             let params = RenderParams {
                 base_color: BACKGROUND,
                 width: 1280,
