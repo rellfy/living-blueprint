@@ -8,7 +8,13 @@ use std::thread::{sleep, spawn};
 use std::time::Duration;
 
 const CLAUDE_COMMAND: &str = "claude";
-const CLAUDE_ARGS: &[&str] = &["--output-format", "stream-json", "--verbose"];
+const CLAUDE_ARGS: &[&str] = &[
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "auto",
+];
 const PATH_INPUT_KEYS: &[&str] = &["file_path", "path", "notebook_path"];
 const STDERR_TAIL_LINES: usize = 8;
 const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(25);
