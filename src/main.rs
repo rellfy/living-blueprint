@@ -6,6 +6,7 @@ use winit::event_loop::EventLoop;
 pub mod agent;
 pub mod analysis;
 pub mod app;
+pub mod repository;
 pub mod resources;
 pub mod state;
 pub mod systems;
