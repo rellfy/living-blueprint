@@ -8,12 +8,14 @@ use crate::systems::render::palette::{
 };
 use crate::systems::render::text::draw_layout;
 use parley::{Affinity, Cursor, Layout, Selection};
+use std::ops::Range;
 use vello::Scene;
 use vello::kurbo::{Affine, Point, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
 
 const PROMPT_MAX_WIDTH_PX: f64 = 760.0;
 const PROMPT_HEIGHT_PX: f64 = 56.0;
+const PROMPT_MAX_LINES: usize = 8;
 const PROMPT_BOTTOM_MARGIN_PX: f64 = 40.0;
 const PROMPT_SIDE_MARGIN_PX: f64 = 24.0;
 const PROMPT_RADIUS_PX: f64 = 16.0;
@@ -48,7 +50,9 @@ impl OverlayPainter<'_> {
             return;
         }
         let scale = self.frame.scale_factor;
-        let rect = self.compute_prompt_rect(visibility);
+        let layout = self.layout_prompt_text(prompt.text());
+        let expansion = compute_prompt_expansion(&layout);
+        let rect = self.compute_prompt_rect(visibility, expansion);
         let alpha = visibility as f32;
         self.draw_panel(rect, PROMPT_RADIUS_PX * scale, alpha);
         let text_rect = rect.inset(-PROMPT_TEXT_INSET_PX * scale);
@@ -60,7 +64,7 @@ impl OverlayPainter<'_> {
         );
         let hint_origin = Point::new(
             text_rect.x1 - hint.width() as f64,
-            rect.center().y - hint.height() as f64 * 0.5,
+            rect.y1 - (PROMPT_HEIGHT_PX * scale + hint.height() as f64) * 0.5,
         );
         draw_layout(
             self.scene,
@@ -69,22 +73,23 @@ impl OverlayPainter<'_> {
             INK_DIM.multiply_alpha(alpha * 0.8),
         );
         let text_clip = Rect::new(text_rect.x0, rect.y0, hint_origin.x - 16.0 * scale, rect.y1);
-        let layout = self.text_engine.layout_label(
-            prompt.text(),
-            PROMPT_FONT_PX * scale as f32,
-            FontRole::Interface,
-            450.0,
-        );
-        let caret_x = caret_offset(&layout, prompt.caret());
+        let view_height = first_line_height(&layout) + expansion;
+        let caret = caret_geometry(&layout, prompt.caret());
         prompt.scroll_x = compute_scroll(
             prompt.scroll_x,
-            caret_x,
+            caret.x0..caret.x0,
             layout.width() as f64,
             text_clip.width() - 4.0 * scale,
         );
+        prompt.scroll_y = compute_scroll(
+            prompt.scroll_y,
+            caret.y0..caret.y1,
+            layout.height() as f64,
+            view_height,
+        );
         let text_origin = Point::new(
             text_clip.x0 - prompt.scroll_x,
-            rect.center().y - layout.height() as f64 * 0.5,
+            rect.center().y - view_height * 0.5 - prompt.scroll_y,
         );
         self.scene
             .push_clip_layer(Fill::NonZero, Affine::IDENTITY, &text_clip);
@@ -96,15 +101,16 @@ impl OverlayPainter<'_> {
             INK.multiply_alpha(alpha),
         );
         self.draw_caret(
-            &layout,
-            text_origin + (caret_x, 0.0),
+            caret.with_origin(text_origin + caret.origin().to_vec2()),
             prompt.caret_phase,
             alpha,
         );
         self.scene.pop_layer();
     }
 
-    pub fn draw_feed(&mut self, feed: &mut AgentFeed, prompt_visibility: f64) {
+    pub fn draw_feed(&mut self, feed: &mut AgentFeed, prompt: &Prompt) {
+        let prompt_layout = self.layout_prompt_text(prompt.text());
+        let prompt_expansion = compute_prompt_expansion(&prompt_layout);
         let scale = self.frame.scale_factor;
         let padding = FEED_PADDING_PX * scale;
         let left = FEED_SIDE_MARGIN_PX * scale;
@@ -118,7 +124,11 @@ impl OverlayPainter<'_> {
             + FEED_ACCENT_PX * scale;
         let mut bottom = self.frame.viewport.height
             - FEED_BOTTOM_MARGIN_PX * scale
-            - self.compute_prompt_clearance(left + widest_card, prompt_visibility);
+            - self.compute_prompt_clearance(
+                left + widest_card,
+                prompt.visibility,
+                prompt_expansion,
+            );
         for entry in feed.entries.iter_mut().rev() {
             let (text_width, text_height) = self.measure_entry(entry);
             let card_height = text_height + padding * 2.0;
@@ -160,19 +170,33 @@ impl OverlayPainter<'_> {
         );
     }
 
-    fn compute_prompt_rect(&self, visibility: f64) -> Rect {
+    fn layout_prompt_text(&mut self, text: &str) -> Layout<ColorBrush> {
+        self.text_engine.layout_label(
+            text,
+            PROMPT_FONT_PX * self.frame.scale_factor as f32,
+            FontRole::Interface,
+            450.0,
+        )
+    }
+
+    fn compute_prompt_rect(&self, visibility: f64, expansion: f64) -> Rect {
         let scale = self.frame.scale_factor;
         let viewport = self.frame.viewport;
         let width =
             (viewport.width - PROMPT_SIDE_MARGIN_PX * 2.0 * scale).min(PROMPT_MAX_WIDTH_PX * scale);
-        let height = PROMPT_HEIGHT_PX * scale;
+        let height = PROMPT_HEIGHT_PX * scale + expansion;
         let slide = (1.0 - ease_out(visibility)) * PROMPT_SLIDE_PX * scale;
         let top = viewport.height - PROMPT_BOTTOM_MARGIN_PX * scale - height + slide;
         Rect::from_origin_size(((viewport.width - width) * 0.5, top), (width, height))
     }
 
-    fn compute_prompt_clearance(&self, feed_right: f64, prompt_visibility: f64) -> f64 {
-        let prompt_rect = self.compute_prompt_rect(1.0);
+    fn compute_prompt_clearance(
+        &self,
+        feed_right: f64,
+        prompt_visibility: f64,
+        prompt_expansion: f64,
+    ) -> f64 {
+        let prompt_rect = self.compute_prompt_rect(1.0, prompt_expansion);
         if feed_right < prompt_rect.x0 {
             return 0.0;
         }
@@ -289,25 +313,18 @@ impl OverlayPainter<'_> {
         }
     }
 
-    fn draw_caret(
-        &mut self,
-        layout: &Layout<ColorBrush>,
-        caret_origin: Point,
-        phase: f64,
-        alpha: f32,
-    ) {
+    fn draw_caret(&mut self, caret_bounds: Rect, phase: f64, alpha: f32) {
         let blink = match (phase * 2.0).fract() < 0.55 {
             true => 1.0,
             false => 0.15,
         };
         let scale = self.frame.scale_factor;
-        let x = caret_origin.x;
         let caret_height = PROMPT_FONT_PX as f64 * 1.15 * scale;
-        let center_y = caret_origin.y + layout.height() as f64 * 0.5;
+        let center_y = caret_bounds.center().y;
         let caret = Rect::new(
-            x,
+            caret_bounds.x0,
             center_y - caret_height * 0.5,
-            x + 2.0 * scale,
+            caret_bounds.x0 + 2.0 * scale,
             center_y + caret_height * 0.5,
         );
         self.scene.fill(
@@ -320,16 +337,28 @@ impl OverlayPainter<'_> {
     }
 }
 
-fn caret_offset(layout: &Layout<ColorBrush>, caret: usize) -> f64 {
-    Cursor::from_byte_index(layout, caret, Affinity::Downstream)
-        .geometry(layout, 0.0)
-        .x0
+fn caret_geometry(layout: &Layout<ColorBrush>, caret: usize) -> Rect {
+    let bounds = Cursor::from_byte_index(layout, caret, Affinity::Downstream).geometry(layout, 0.0);
+    Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1)
 }
 
-fn compute_scroll(current: f64, caret_x: f64, text_width: f64, view_width: f64) -> f64 {
-    let view_width = view_width.max(0.0);
-    let max_scroll = (text_width - view_width).max(0.0);
-    let scroll = current.clamp(caret_x - view_width, caret_x);
+fn compute_prompt_expansion(layout: &Layout<ColorBrush>) -> f64 {
+    let line_height = first_line_height(layout);
+    let max_expansion = line_height * (PROMPT_MAX_LINES - 1) as f64;
+    (layout.height() as f64 - line_height).clamp(0.0, max_expansion)
+}
+
+fn first_line_height(layout: &Layout<ColorBrush>) -> f64 {
+    layout
+        .lines()
+        .next()
+        .map_or(0.0, |line| line.metrics().line_height as f64)
+}
+
+fn compute_scroll(current: f64, caret: Range<f64>, content_size: f64, view_size: f64) -> f64 {
+    let view_size = view_size.max(0.0);
+    let max_scroll = (content_size - view_size).max(0.0);
+    let scroll = current.max(caret.end - view_size).min(caret.start);
     scroll.clamp(0.0, max_scroll)
 }
 

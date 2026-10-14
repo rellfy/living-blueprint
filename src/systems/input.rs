@@ -45,7 +45,7 @@ pub fn handle_key(state: &mut State, event: KeyEvent) {
         .modifiers
         .intersects(ModifiersState::CONTROL | ModifiersState::SUPER);
     match event.logical_key {
-        Key::Named(NamedKey::Enter) => submit_prompt(state),
+        Key::Named(NamedKey::Enter) => handle_enter(state),
         Key::Named(NamedKey::Escape) => escape_prompt(state),
         Key::Named(NamedKey::Home) if state.prompt.get_is_empty() => fit_repository(state),
         Key::Named(key) => handle_named_key(state, key, event.text.as_deref()),
@@ -81,6 +81,15 @@ pub fn viewport_size(state: &State) -> Size {
     Size::new(config.width as f64, config.height as f64)
 }
 
+fn handle_enter(state: &mut State) {
+    let is_shifted = state.modifiers.shift_key();
+    match (is_shifted, state.prompt.get_is_caret_after_backslash()) {
+        (true, _) => state.prompt.break_line(),
+        (false, true) => state.prompt.break_escaped_line(),
+        (false, false) => submit_prompt(state),
+    }
+}
+
 fn handle_named_key(state: &mut State, key: NamedKey, text: Option<&str>) {
     let modifiers = state.modifiers;
     let is_extending = modifiers.shift_key();
@@ -88,8 +97,10 @@ fn handle_named_key(state: &mut State, key: NamedKey, text: Option<&str>) {
     match key {
         NamedKey::ArrowLeft => prompt.move_caret(left_motion(modifiers), is_extending),
         NamedKey::ArrowRight => prompt.move_caret(right_motion(modifiers), is_extending),
-        NamedKey::Home | NamedKey::ArrowUp => prompt.move_caret(Motion::Start, is_extending),
-        NamedKey::End | NamedKey::ArrowDown => prompt.move_caret(Motion::End, is_extending),
+        NamedKey::ArrowUp => prompt.move_caret(Motion::LineUp, is_extending),
+        NamedKey::ArrowDown => prompt.move_caret(Motion::LineDown, is_extending),
+        NamedKey::Home => prompt.move_caret(Motion::Start, is_extending),
+        NamedKey::End => prompt.move_caret(Motion::End, is_extending),
         NamedKey::Backspace => prompt.delete(left_motion(modifiers)),
         NamedKey::Delete => prompt.delete(right_motion(modifiers)),
         _ => insert_text(state, text),

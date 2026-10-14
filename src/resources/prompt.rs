@@ -10,6 +10,7 @@ pub struct Prompt {
     pub visibility: f64,
     pub caret_phase: f64,
     pub scroll_x: f64,
+    pub scroll_y: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,8 @@ pub enum Motion {
     WordRight,
     Start,
     End,
+    LineUp,
+    LineDown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +62,7 @@ impl Prompt {
             visibility: 0.0,
             caret_phase: 0.0,
             scroll_x: 0.0,
+            scroll_y: 0.0,
         }
     }
 
@@ -90,6 +94,10 @@ impl Prompt {
         self.caret != self.anchor
     }
 
+    pub fn get_is_caret_after_backslash(&self) -> bool {
+        !self.get_has_selection() && self.text[..self.caret].ends_with('\\')
+    }
+
     pub fn insert(&mut self, text: &str) {
         let printable: String = text.chars().filter(|c| !c.is_control()).collect();
         if printable.is_empty() {
@@ -103,9 +111,26 @@ impl Prompt {
         self.replace_selection(&printable);
     }
 
+    pub fn break_line(&mut self) {
+        self.record(EditKind::Other);
+        self.replace_selection("\n");
+    }
+
+    pub fn break_escaped_line(&mut self) {
+        if !self.get_is_caret_after_backslash() {
+            return;
+        }
+        self.record(EditKind::Other);
+        self.anchor = self.caret - '\\'.len_utf8();
+        self.replace_selection("\n");
+    }
+
     pub fn paste(&mut self, text: &str) {
-        let single_line = text.replace(['\r', '\n', '\t'], " ");
-        let printable: String = single_line.chars().filter(|c| !c.is_control()).collect();
+        let normalised = text.replace("\r\n", "\n").replace(['\r', '\t'], " ");
+        let printable: String = normalised
+            .chars()
+            .filter(|c| *c == '\n' || !c.is_control())
+            .collect();
         if printable.is_empty() {
             return;
         }
@@ -169,6 +194,7 @@ impl Prompt {
         self.caret = 0;
         self.anchor = 0;
         self.scroll_x = 0.0;
+        self.scroll_y = 0.0;
         self.history = EditHistory::new();
     }
 
@@ -206,7 +232,45 @@ impl Prompt {
             Motion::WordRight => self.find_next_word(),
             Motion::Start => 0,
             Motion::End => self.text.len(),
+            Motion::LineUp => self.find_line_above(),
+            Motion::LineDown => self.find_line_below(),
         }
+    }
+
+    fn find_line_above(&self) -> usize {
+        let line_start = self.find_line_start(self.caret);
+        if line_start == 0 {
+            return 0;
+        }
+        let previous_line_start = self.find_line_start(line_start - 1);
+        self.find_column_offset(previous_line_start, self.count_column())
+    }
+
+    fn find_line_below(&self) -> usize {
+        let Some(newline) = self.text[self.caret..].find('\n') else {
+            return self.text.len();
+        };
+        self.find_column_offset(self.caret + newline + 1, self.count_column())
+    }
+
+    fn find_line_start(&self, index: usize) -> usize {
+        self.text[..index]
+            .rfind('\n')
+            .map_or(0, |newline| newline + 1)
+    }
+
+    fn count_column(&self) -> usize {
+        let line_start = self.find_line_start(self.caret);
+        self.text[line_start..self.caret].chars().count()
+    }
+
+    fn find_column_offset(&self, line_start: usize, column: usize) -> usize {
+        let line = &self.text[line_start..];
+        let line_end = line.find('\n').unwrap_or(line.len());
+        line[..line_end]
+            .char_indices()
+            .nth(column)
+            .map_or(line_start + line_end, |(index, _)| line_start + index)
     }
 
     fn find_previous_char(&self) -> usize {
@@ -402,9 +466,39 @@ mod tests {
     }
 
     #[test]
-    fn pastes_as_single_line() {
+    fn pastes_line_breaks() {
         let mut prompt = Prompt::new();
-        prompt.paste("one\ntwo");
-        assert_eq!(prompt.text(), "one two");
+        prompt.paste("one\r\ntwo\tthree");
+        assert_eq!(prompt.text(), "one\ntwo three");
+    }
+
+    #[test]
+    fn breaks_escaped_line() {
+        let mut prompt = prompt_with("one\\");
+        assert!(prompt.get_is_caret_after_backslash());
+        prompt.break_escaped_line();
+        prompt.insert("two");
+        assert_eq!(prompt.text(), "one\ntwo");
+        prompt.undo();
+        prompt.undo();
+        assert_eq!(prompt.text(), "one\\");
+    }
+
+    #[test]
+    fn moves_between_lines() {
+        let mut prompt = prompt_with("hello");
+        prompt.break_line();
+        prompt.insert("ab");
+        prompt.move_caret(Motion::LineUp, false);
+        assert_eq!(prompt.caret(), 2);
+        prompt.move_caret(Motion::End, false);
+        prompt.move_caret(Motion::LineUp, false);
+        prompt.move_caret(Motion::LineUp, false);
+        assert_eq!(prompt.caret(), 0);
+        prompt.move_caret(Motion::WordRight, false);
+        prompt.move_caret(Motion::LineDown, false);
+        assert_eq!(prompt.caret(), 8);
+        prompt.move_caret(Motion::LineDown, false);
+        assert_eq!(prompt.caret(), 8);
     }
 }
