@@ -1,0 +1,328 @@
+use crate::analysis::SymbolKind;
+use crate::repository::layout::{FILE_HEADER_HEIGHT, FILE_PADDING, LINE_HEIGHT};
+use crate::repository::{Node, NodeId, NodeKind, Repository};
+use crate::resources::text::{FontRole, TextEngine};
+use crate::systems::render::cache::{LABEL_FONT_SIZE, RenderCache};
+use crate::systems::render::palette::{ACCENT, INK, INK_DIM};
+use crate::systems::render::text::{draw_layout, draw_layout_lines};
+use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
+use vello::Scene;
+use vello::kurbo::{Affine, Line, Point, Rect, RoundedRect, Stroke, Vec2};
+use vello::peniko::{Color, Fill};
+
+const MIN_NODE_SCREEN_SIZE: f64 = 2.0;
+const NODE_STROKE_PX: f64 = 1.25;
+const CORNER_RADIUS_PX: f64 = 6.0;
+const DIRECTORY_FILL: Color = Color::from_rgba8(255, 255, 255, 7);
+const FILE_FILL: Color = Color::from_rgba8(255, 255, 255, 14);
+const FILE_FILL_HOVERED: Color = Color::from_rgba8(255, 255, 255, 30);
+const CODE_FADE_START_PX: f64 = 5.0;
+const CODE_FADE_END_PX: f64 = 9.0;
+const BARS_FADE_START_PX: f64 = 0.3;
+const BARS_FADE_END_PX: f64 = 0.9;
+const DIRECTORY_LABEL_RATIO: f64 = 0.5;
+const FILE_HEADER_LABEL_SIZE: f64 = 16.0;
+const MIN_LABEL_PX: f64 = 4.5;
+const MAX_DIRECTORY_LABEL_PX: f64 = 30.0;
+const MAX_TILE_LABEL_PX: f64 = 24.0;
+const DEFINITION_LABEL_PX: f64 = 11.0;
+const MIN_DEFINITION_SPACING_PX: f64 = 14.0;
+const MIN_DEFINITION_FILE_WIDTH_PX: f64 = 80.0;
+
+pub struct MapPainter<'a> {
+    pub scene: &'a mut Scene,
+    pub cache: &'a mut RenderCache,
+    pub text_engine: &'a mut TextEngine,
+    pub repository: &'a Repository,
+    pub frame: &'a FrameContext,
+    pub hovered: Option<NodeId>,
+}
+
+struct LabelPlacement {
+    origin: Point,
+    world_size: f64,
+    alpha: f32,
+    color: Color,
+    weight: f32,
+}
+
+impl MapPainter<'_> {
+    pub fn draw(&mut self) {
+        self.draw_node(self.repository.root_id());
+    }
+
+    fn draw_node(&mut self, id: NodeId) {
+        let node = self.repository.node(id);
+        if !check_overlaps(node.rect, self.frame.visible) {
+            return;
+        }
+        if node.rect.width().min(node.rect.height()) * self.frame.zoom < MIN_NODE_SCREEN_SIZE {
+            return;
+        }
+        match node.kind {
+            NodeKind::Directory => self.draw_directory(id, node),
+            NodeKind::File(_) => self.draw_file(id, node),
+        }
+    }
+
+    fn draw_directory(&mut self, id: NodeId, node: &Node) {
+        let stroke_color = match self.hovered == Some(id) {
+            true => ACCENT,
+            false => INK.multiply_alpha(0.55),
+        };
+        self.draw_box(node.rect, DIRECTORY_FILL, stroke_color);
+        self.draw_separator(node.rect, node.header_height, 0.25);
+        self.draw_directory_label(node);
+        for child in &node.children {
+            self.draw_node(*child);
+        }
+    }
+
+    fn draw_file(&mut self, id: NodeId, node: &Node) {
+        let line_px = LINE_HEIGHT * self.frame.zoom;
+        let code_alpha = smoothstep(CODE_FADE_START_PX, CODE_FADE_END_PX, line_px);
+        let bars_alpha =
+            smoothstep(BARS_FADE_START_PX, BARS_FADE_END_PX, line_px) * (1.0 - code_alpha);
+        let is_hovered = self.hovered == Some(id);
+        let (fill, stroke) = match is_hovered {
+            true => (FILE_FILL_HOVERED, ACCENT),
+            false => (FILE_FILL, INK.multiply_alpha(0.75)),
+        };
+        self.draw_box(node.rect, fill, stroke);
+        self.draw_separator(node.rect, FILE_HEADER_HEIGHT, 0.3 * code_alpha as f32);
+        self.draw_line_bars(id, node, bars_alpha);
+        self.draw_code(id, node, code_alpha);
+        self.draw_definitions(node, bars_alpha);
+        self.draw_file_labels(node, code_alpha);
+    }
+
+    fn draw_box(&mut self, rect: Rect, fill: Color, stroke: Color) {
+        let zoom = self.frame.zoom;
+        let radius = (CORNER_RADIUS_PX / zoom).min(rect.width().min(rect.height()) * 0.08);
+        let shape = RoundedRect::from_rect(rect, radius);
+        self.scene
+            .fill(Fill::NonZero, self.frame.transform, fill, None, &shape);
+        self.scene.stroke(
+            &Stroke::new(NODE_STROKE_PX * self.frame.scale_factor / zoom),
+            self.frame.transform,
+            stroke,
+            None,
+            &shape,
+        );
+    }
+
+    fn draw_separator(&mut self, rect: Rect, header_height: f64, alpha: f32) {
+        if alpha <= 0.01 {
+            return;
+        }
+        let y = rect.y0 + header_height;
+        self.scene.stroke(
+            &Stroke::new(self.frame.scale_factor / self.frame.zoom),
+            self.frame.transform,
+            INK.multiply_alpha(alpha),
+            None,
+            &Line::new((rect.x0, y), (rect.x1, y)),
+        );
+    }
+
+    fn draw_line_bars(&mut self, id: NodeId, node: &Node, alpha: f64) {
+        if alpha <= 0.01 {
+            return;
+        }
+        let bars = self
+            .cache
+            .line_bars(id, node, self.text_engine.char_advance());
+        self.scene.fill(
+            Fill::NonZero,
+            self.frame.transform,
+            INK_DIM.multiply_alpha(0.5 * alpha as f32),
+            None,
+            bars,
+        );
+    }
+
+    fn draw_code(&mut self, id: NodeId, node: &Node, alpha: f64) {
+        if alpha <= 0.01 {
+            return;
+        }
+        let content = Rect::new(
+            node.rect.x0 + FILE_PADDING * 0.5,
+            node.rect.y0 + FILE_HEADER_HEIGHT,
+            node.rect.x1 - FILE_PADDING * 0.5,
+            node.rect.y1,
+        );
+        let visible = content.intersect(self.frame.visible);
+        if visible.is_zero_area() {
+            return;
+        }
+        let first_line = ((visible.y0 - content.y0) / LINE_HEIGHT).floor().max(0.0) as usize;
+        let last_line = ((visible.y1 - content.y0) / LINE_HEIGHT).ceil() as usize + 1;
+        let Some(layout) = self.cache.code_layout(id, node, self.text_engine) else {
+            return;
+        };
+        let text_transform =
+            self.frame.transform * Affine::translate((node.rect.x0 + FILE_PADDING, content.y0));
+        self.scene
+            .push_clip_layer(Fill::NonZero, self.frame.transform, &content);
+        draw_layout_lines(
+            self.scene,
+            layout,
+            text_transform,
+            alpha as f32,
+            first_line..last_line,
+        );
+        self.scene.pop_layer();
+    }
+
+    fn draw_definitions(&mut self, node: &Node, alpha: f64) {
+        let zoom = self.frame.zoom;
+        if alpha <= 0.2 || node.rect.width() * zoom < MIN_DEFINITION_FILE_WIDTH_PX {
+            return;
+        }
+        let Some(analysis) = node.source_file().and_then(|file| file.analysis.as_ref()) else {
+            return;
+        };
+        let label_px = DEFINITION_LABEL_PX * self.frame.scale_factor;
+        let mut last_screen_y = f64::NEG_INFINITY;
+        for symbol in analysis
+            .definitions
+            .iter()
+            .filter(|symbol| check_is_outline_symbol(symbol.kind))
+        {
+            let world_y = node.rect.y0 + FILE_HEADER_HEIGHT + symbol.line as f64 * LINE_HEIGHT;
+            let screen_y = world_y * zoom;
+            if screen_y - last_screen_y < MIN_DEFINITION_SPACING_PX * self.frame.scale_factor {
+                continue;
+            }
+            if world_y < self.frame.visible.y0 || world_y > self.frame.visible.y1 {
+                continue;
+            }
+            last_screen_y = screen_y;
+            self.draw_label(
+                &symbol.name,
+                LabelPlacement {
+                    origin: Point::new(
+                        node.rect.x0 + FILE_PADDING,
+                        world_y - label_px * 0.5 / zoom,
+                    ),
+                    world_size: label_px / zoom,
+                    alpha: alpha as f32,
+                    color: ACCENT,
+                    weight: 600.0,
+                },
+            );
+        }
+    }
+
+    fn draw_directory_label(&mut self, node: &Node) {
+        let world_size = node.header_height * DIRECTORY_LABEL_RATIO;
+        let world_size = cap_world_size(world_size, MAX_DIRECTORY_LABEL_PX, self.frame);
+        let origin = Point::new(
+            node.rect.x0 + node.header_height * 0.45,
+            node.rect.y0 + (node.header_height - world_size * 1.2) * 0.5,
+        );
+        self.draw_label(
+            &directory_label(node),
+            LabelPlacement {
+                origin,
+                world_size,
+                alpha: 0.95,
+                color: INK,
+                weight: 650.0,
+            },
+        );
+    }
+
+    fn draw_file_labels(&mut self, node: &Node, code_alpha: f64) {
+        self.draw_label(
+            &node.name,
+            LabelPlacement {
+                origin: Point::new(
+                    node.rect.x0 + FILE_PADDING,
+                    node.rect.y0 + (FILE_HEADER_HEIGHT - FILE_HEADER_LABEL_SIZE * 1.2) * 0.5,
+                ),
+                world_size: FILE_HEADER_LABEL_SIZE,
+                alpha: code_alpha as f32,
+                color: INK,
+                weight: 600.0,
+            },
+        );
+        self.draw_tile_label(node, 1.0 - code_alpha);
+    }
+
+    fn draw_tile_label(&mut self, node: &Node, alpha: f64) {
+        if alpha <= 0.01 {
+            return;
+        }
+        let rect = node.rect;
+        let character_count = node.name.chars().count().max(1) as f64;
+        let fitted_size = (rect.width() * 0.85 / (character_count * 0.6)).min(rect.height() * 0.3);
+        let world_size = cap_world_size(fitted_size, MAX_TILE_LABEL_PX, self.frame);
+        let layout = self
+            .cache
+            .label(&node.name, FontRole::Interface, 600.0, self.text_engine);
+        let scale = world_size / LABEL_FONT_SIZE as f64;
+        let label_size = Vec2::new(layout.width() as f64, layout.height() as f64) * scale;
+        let anchor_y = rect.y0 + rect.height().min(rect.width() * 0.6) * 0.5;
+        let origin = Point::new(
+            rect.center().x - label_size.x * 0.5,
+            anchor_y - label_size.y * 0.5,
+        );
+        self.draw_label(
+            &node.name,
+            LabelPlacement {
+                origin,
+                world_size,
+                alpha: alpha as f32,
+                color: INK,
+                weight: 600.0,
+            },
+        );
+    }
+
+    fn draw_label(&mut self, text: &str, placement: LabelPlacement) {
+        let screen_size = placement.world_size * self.frame.zoom;
+        if placement.alpha <= 0.01 || screen_size < MIN_LABEL_PX * self.frame.scale_factor {
+            return;
+        }
+        let layout = self.cache.label(
+            text,
+            FontRole::Interface,
+            placement.weight,
+            self.text_engine,
+        );
+        let transform = self.frame.transform
+            * Affine::translate(placement.origin.to_vec2())
+            * Affine::scale(placement.world_size / LABEL_FONT_SIZE as f64);
+        draw_layout(
+            self.scene,
+            layout,
+            transform,
+            placement.color.multiply_alpha(placement.alpha),
+        );
+    }
+}
+
+fn cap_world_size(world_size: f64, max_screen_px: f64, frame: &FrameContext) -> f64 {
+    world_size.min(max_screen_px * frame.scale_factor / frame.zoom)
+}
+
+fn directory_label(node: &Node) -> String {
+    match node.parent {
+        Some(_) => format!("{}/", node.name),
+        None => node.name.clone(),
+    }
+}
+
+fn check_is_outline_symbol(kind: SymbolKind) -> bool {
+    matches!(
+        kind,
+        SymbolKind::Function
+            | SymbolKind::Method
+            | SymbolKind::Class
+            | SymbolKind::Interface
+            | SymbolKind::Module
+            | SymbolKind::Macro
+            | SymbolKind::Type
+    )
+}

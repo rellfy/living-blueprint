@@ -15,7 +15,7 @@ const ADVANCE_PROBE: &str = "0000000000";
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ColorBrush(pub Color);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontRole {
     Code,
     Interface,

@@ -1,4 +1,5 @@
 use crate::resources::wgpu::WgpuResource;
+use crate::systems::render::cache::RenderCache;
 use std::num::NonZeroUsize;
 use vello::{AaSupport, Renderer, RendererOptions, Scene};
 use wgpu::util::TextureBlitter;
@@ -12,6 +13,7 @@ pub struct RenderState {
     pub scene: Scene,
     pub target_view: TextureView,
     pub blitter: TextureBlitter,
+    pub cache: RenderCache,
 }
 
 impl RenderState {
@@ -33,6 +35,7 @@ impl RenderState {
             scene: Scene::new(),
             target_view: create_target_view(device, config.width, config.height),
             blitter: TextureBlitter::new(device, config.format),
+            cache: RenderCache::default(),
         }
     }
 
