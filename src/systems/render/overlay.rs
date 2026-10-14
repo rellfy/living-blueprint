@@ -7,7 +7,7 @@ use crate::systems::render::palette::{
     ACCENT, FAILURE, INK, INK_DIM, ORB_GLOW, PANEL, SHADOW, SUCCESS,
 };
 use crate::systems::render::text::draw_layout;
-use parley::Layout;
+use parley::{Affinity, Cursor, Layout, Selection};
 use vello::Scene;
 use vello::kurbo::{Affine, Point, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
@@ -42,7 +42,7 @@ pub struct OverlayPainter<'a> {
 }
 
 impl OverlayPainter<'_> {
-    pub fn draw_prompt(&mut self, prompt: &Prompt) {
+    pub fn draw_prompt(&mut self, prompt: &mut Prompt) {
         let visibility = prompt.visibility;
         if visibility <= 0.01 {
             return;
@@ -75,20 +75,32 @@ impl OverlayPainter<'_> {
             FontRole::Interface,
             450.0,
         );
-        let overflow = (layout.width() as f64 - text_clip.width() + 4.0 * scale).max(0.0);
+        let caret_x = caret_offset(&layout, prompt.caret());
+        prompt.scroll_x = compute_scroll(
+            prompt.scroll_x,
+            caret_x,
+            layout.width() as f64,
+            text_clip.width() - 4.0 * scale,
+        );
         let text_origin = Point::new(
-            text_clip.x0 - overflow,
+            text_clip.x0 - prompt.scroll_x,
             rect.center().y - layout.height() as f64 * 0.5,
         );
         self.scene
             .push_clip_layer(Fill::NonZero, Affine::IDENTITY, &text_clip);
+        self.draw_selection(&layout, text_origin, prompt, alpha);
         draw_layout(
             self.scene,
             &layout,
             Affine::translate(text_origin.to_vec2()),
             INK.multiply_alpha(alpha),
         );
-        self.draw_caret(&layout, text_origin, prompt.caret_phase, alpha);
+        self.draw_caret(
+            &layout,
+            text_origin + (caret_x, 0.0),
+            prompt.caret_phase,
+            alpha,
+        );
         self.scene.pop_layer();
     }
 
@@ -250,10 +262,37 @@ impl OverlayPainter<'_> {
         );
     }
 
-    fn draw_caret(
+    fn draw_selection(
         &mut self,
         layout: &Layout<ColorBrush>,
         text_origin: Point,
+        prompt: &Prompt,
+        alpha: f32,
+    ) {
+        if !prompt.get_has_selection() {
+            return;
+        }
+        let selection = Selection::new(
+            Cursor::from_byte_index(layout, prompt.anchor(), Affinity::Downstream),
+            Cursor::from_byte_index(layout, prompt.caret(), Affinity::Downstream),
+        );
+        let transform = Affine::translate(text_origin.to_vec2());
+        for (bounds, _) in selection.geometry(layout) {
+            let highlight = Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y1);
+            self.scene.fill(
+                Fill::NonZero,
+                transform,
+                ORB_GLOW.multiply_alpha(alpha * 0.35),
+                None,
+                &highlight,
+            );
+        }
+    }
+
+    fn draw_caret(
+        &mut self,
+        layout: &Layout<ColorBrush>,
+        caret_origin: Point,
         phase: f64,
         alpha: f32,
     ) {
@@ -262,9 +301,9 @@ impl OverlayPainter<'_> {
             false => 0.15,
         };
         let scale = self.frame.scale_factor;
-        let x = text_origin.x + layout.width() as f64 + 2.0 * scale;
+        let x = caret_origin.x;
         let caret_height = PROMPT_FONT_PX as f64 * 1.15 * scale;
-        let center_y = text_origin.y + layout.height() as f64 * 0.5;
+        let center_y = caret_origin.y + layout.height() as f64 * 0.5;
         let caret = Rect::new(
             x,
             center_y - caret_height * 0.5,
@@ -279,6 +318,19 @@ impl OverlayPainter<'_> {
             &caret,
         );
     }
+}
+
+fn caret_offset(layout: &Layout<ColorBrush>, caret: usize) -> f64 {
+    Cursor::from_byte_index(layout, caret, Affinity::Downstream)
+        .geometry(layout, 0.0)
+        .x0
+}
+
+fn compute_scroll(current: f64, caret_x: f64, text_width: f64, view_width: f64) -> f64 {
+    let view_width = view_width.max(0.0);
+    let max_scroll = (text_width - view_width).max(0.0);
+    let scroll = current.clamp(caret_x - view_width, caret_x);
+    scroll.clamp(0.0, max_scroll)
 }
 
 fn feed_entry_alpha(age_seconds: f64) -> f32 {

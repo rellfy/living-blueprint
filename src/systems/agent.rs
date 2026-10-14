@@ -26,7 +26,7 @@ pub fn submit_prompt(state: &mut State) {
         session.feed.push(FeedKind::Failure, BUSY_MESSAGE);
         return;
     }
-    state.prompt.clear();
+    state.prompt.reset();
     session.process = Some(AgentProcess::spawn(&prompt, &state.repository_root));
     session.status = AgentStatus::Working;
     session.feed.push(FeedKind::Prompt, &prompt);

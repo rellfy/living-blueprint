@@ -1,5 +1,6 @@
 use crate::State;
 use crate::resources::pointer::PointerRelease;
+use crate::resources::prompt::Motion;
 use crate::systems::agent::submit_prompt;
 use vello::kurbo::{Point, Size};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
@@ -40,11 +41,15 @@ pub fn handle_key(state: &mut State, event: KeyEvent) {
     if event.state != ElementState::Pressed {
         return;
     }
+    let is_command = state
+        .modifiers
+        .intersects(ModifiersState::CONTROL | ModifiersState::SUPER);
     match event.logical_key {
         Key::Named(NamedKey::Enter) => submit_prompt(state),
-        Key::Named(NamedKey::Backspace) => state.prompt.backspace(),
-        Key::Named(NamedKey::Escape) => state.prompt.clear(),
-        Key::Named(NamedKey::Home) => fit_repository(state),
+        Key::Named(NamedKey::Escape) => escape_prompt(state),
+        Key::Named(NamedKey::Home) if state.prompt.get_is_empty() => fit_repository(state),
+        Key::Named(key) => handle_named_key(state, key, event.text.as_deref()),
+        Key::Character(ref key) if is_command => handle_shortcut(state, key),
         _ => insert_text(state, event.text.as_deref()),
     }
 }
@@ -76,6 +81,60 @@ pub fn viewport_size(state: &State) -> Size {
     Size::new(config.width as f64, config.height as f64)
 }
 
+fn handle_named_key(state: &mut State, key: NamedKey, text: Option<&str>) {
+    let modifiers = state.modifiers;
+    let is_extending = modifiers.shift_key();
+    let prompt = &mut state.prompt;
+    match key {
+        NamedKey::ArrowLeft => prompt.move_caret(left_motion(modifiers), is_extending),
+        NamedKey::ArrowRight => prompt.move_caret(right_motion(modifiers), is_extending),
+        NamedKey::Home | NamedKey::ArrowUp => prompt.move_caret(Motion::Start, is_extending),
+        NamedKey::End | NamedKey::ArrowDown => prompt.move_caret(Motion::End, is_extending),
+        NamedKey::Backspace => prompt.delete(left_motion(modifiers)),
+        NamedKey::Delete => prompt.delete(right_motion(modifiers)),
+        _ => insert_text(state, text),
+    }
+}
+
+fn handle_shortcut(state: &mut State, key: &str) {
+    let is_shifted = state.modifiers.shift_key();
+    match (key.to_lowercase().as_str(), is_shifted) {
+        ("a", _) => state.prompt.select_all(),
+        ("c", _) => copy_selection(state),
+        ("x", _) => cut_selection(state),
+        ("v", _) => paste_clipboard(state),
+        ("z", false) => state.prompt.undo(),
+        ("z", true) | ("y", _) => state.prompt.redo(),
+        _ => {}
+    }
+}
+
+fn escape_prompt(state: &mut State) {
+    match state.prompt.get_has_selection() {
+        true => state.prompt.collapse_selection(),
+        false => state.prompt.clear(),
+    }
+}
+
+fn copy_selection(state: &mut State) {
+    if !state.prompt.get_has_selection() {
+        return;
+    }
+    state.clipboard.write(state.prompt.selected_text());
+}
+
+fn cut_selection(state: &mut State) {
+    copy_selection(state);
+    state.prompt.delete_selection();
+}
+
+fn paste_clipboard(state: &mut State) {
+    let Some(text) = state.clipboard.read() else {
+        return;
+    };
+    state.prompt.paste(&text);
+}
+
 fn insert_text(state: &mut State, text: Option<&str>) {
     let is_shortcut = state
         .modifiers
@@ -87,6 +146,28 @@ fn insert_text(state: &mut State, text: Option<&str>) {
         return;
     }
     state.prompt.insert(text);
+}
+
+fn left_motion(modifiers: ModifiersState) -> Motion {
+    match (
+        modifiers.super_key(),
+        modifiers.control_key() || modifiers.alt_key(),
+    ) {
+        (true, _) => Motion::Start,
+        (false, true) => Motion::WordLeft,
+        (false, false) => Motion::CharLeft,
+    }
+}
+
+fn right_motion(modifiers: ModifiersState) -> Motion {
+    match (
+        modifiers.super_key(),
+        modifiers.control_key() || modifiers.alt_key(),
+    ) {
+        (true, _) => Motion::End,
+        (false, true) => Motion::WordRight,
+        (false, false) => Motion::CharRight,
+    }
 }
 
 fn handle_release(state: &mut State) {

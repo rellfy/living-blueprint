@@ -1,6 +1,7 @@
 use crate::repository::{NodeId, Repository};
 use crate::resources::agent_session::AgentSession;
 use crate::resources::camera::Camera;
+use crate::resources::clipboard::Clipboard;
 use crate::resources::pointer::Pointer;
 use crate::resources::prompt::Prompt;
 use crate::resources::repository_sync::RepositorySync;
@@ -34,6 +35,7 @@ pub struct State {
     pub camera: Camera,
     pub pointer: Pointer,
     pub prompt: Prompt,
+    pub clipboard: Clipboard,
     pub modifiers: ModifiersState,
     pub agent_session: AgentSession,
     pub repository_root: PathBuf,
@@ -61,6 +63,7 @@ impl State {
             camera: Camera::new(),
             pointer: Pointer::new(),
             prompt: Prompt::new(),
+            clipboard: Clipboard::new(),
             modifiers: ModifiersState::empty(),
             agent_session: AgentSession::new(),
             repository_root,

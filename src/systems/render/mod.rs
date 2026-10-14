@@ -75,7 +75,7 @@ fn compose_scene(state: &mut State) {
         frame: &frame,
     };
     overlay.draw_feed(&mut state.agent_session.feed, state.prompt.visibility);
-    overlay.draw_prompt(&state.prompt);
+    overlay.draw_prompt(&mut state.prompt);
     let notice = match (&state.load_error, state.repository.is_none()) {
         (Some(error), _) => Some(error.clone()),
         (None, true) => Some(LOADING_MESSAGE.to_string()),
@@ -258,6 +258,8 @@ mod tests {
             draw_edges(&mut scene, &repository, &frame, None);
             let mut prompt = crate::resources::prompt::Prompt::new();
             prompt.insert("explain how the semantic zoom levels are chosen");
+            prompt.move_caret(crate::resources::prompt::Motion::WordLeft, false);
+            prompt.move_caret(crate::resources::prompt::Motion::WordLeft, true);
             prompt.visibility = 1.0;
             let mut session = crate::resources::agent_session::AgentSession::new();
             session.status = crate::resources::agent_session::AgentStatus::Working;
@@ -288,7 +290,7 @@ mod tests {
                 frame: &frame,
             };
             overlay.draw_feed(&mut session.feed, prompt.visibility);
-            overlay.draw_prompt(&prompt);
+            overlay.draw_prompt(&mut prompt);
             let params = RenderParams {
                 base_color: BACKGROUND,
                 width: 1280,

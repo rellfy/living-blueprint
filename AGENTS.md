@@ -26,3 +26,8 @@ to make things more isolated and organised.
 A resource in the resources module is, therefore, used by multiple systems,
 otherwise it would be part of a system's state.
 
+
+# Committing
+
+Use conventional commits with a short message of a few words and no body,
+e.g. `feat: prompt text editing`.

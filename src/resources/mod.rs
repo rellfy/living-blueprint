@@ -1,6 +1,7 @@
 pub mod agent_feed;
 pub mod agent_session;
 pub mod camera;
+pub mod clipboard;
 pub mod pointer;
 pub mod prompt;
 pub mod repository_sync;
