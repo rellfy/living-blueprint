@@ -30,6 +30,7 @@ pub struct FrameContext {
     pub visible: Rect,
     pub scale_factor: f64,
     pub elapsed_seconds: f64,
+    pub delta_time: f64,
 }
 
 pub fn render(state: &mut State) {
@@ -73,7 +74,7 @@ fn compose_scene(state: &mut State) {
         text_engine: &mut state.text_engine,
         frame: &frame,
     };
-    overlay.draw_status(&state.agent_session);
+    overlay.draw_feed(&mut state.agent_session.feed, state.prompt.visibility);
     overlay.draw_prompt(&state.prompt);
     let notice = match (&state.load_error, state.repository.is_none()) {
         (Some(error), _) => Some(error.clone()),
@@ -96,6 +97,7 @@ fn create_frame_context(state: &State) -> FrameContext {
         visible: state.camera.visible_world_rect(viewport),
         scale_factor: state.window.scale_factor(),
         elapsed_seconds: state.start_time.elapsed().as_secs_f64(),
+        delta_time: state.delta_time,
     }
 }
 
@@ -239,6 +241,7 @@ mod tests {
                 visible: camera.visible_world_rect(viewport),
                 scale_factor: 1.0,
                 elapsed_seconds: 0.0,
+                delta_time: 1.0,
             };
             let mut scene = Scene::new();
             cache.begin_frame();
@@ -258,8 +261,24 @@ mod tests {
             prompt.visibility = 1.0;
             let mut session = crate::resources::agent_session::AgentSession::new();
             session.status = crate::resources::agent_session::AgentStatus::Working;
-            session.last_message = Some("Read src/systems/render/map.rs".to_string());
-            session.status_visibility = 1.0;
+            session.feed.push(
+                crate::resources::agent_feed::FeedKind::Prompt,
+                "explain the zoom levels",
+            );
+            session.feed.push(
+                crate::resources::agent_feed::FeedKind::ToolUse,
+                "Read src/systems/render/map.rs",
+            );
+            session.feed.push(
+                crate::resources::agent_feed::FeedKind::Message,
+                &"The map picks a level from the on-screen line height of each file. ".repeat(4),
+            );
+            session
+                .feed
+                .push(crate::resources::agent_feed::FeedKind::Success, "done");
+            for entry in &mut session.feed.entries {
+                entry.age_seconds = 5.0;
+            }
             session.orb.visibility = 1.0;
             session.orb.position = main_rect.center();
             draw_orb(&mut scene, &session.orb, &frame);
@@ -268,7 +287,7 @@ mod tests {
                 text_engine: &mut text_engine,
                 frame: &frame,
             };
-            overlay.draw_status(&session);
+            overlay.draw_feed(&mut session.feed, prompt.visibility);
             overlay.draw_prompt(&prompt);
             let params = RenderParams {
                 base_color: BACKGROUND,

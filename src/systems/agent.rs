@@ -1,5 +1,6 @@
 use crate::State;
 use crate::agent::{AgentEvent, AgentProcess};
+use crate::resources::agent_feed::FeedKind;
 use crate::resources::agent_session::{AgentSession, AgentStatus};
 use crate::systems::input::viewport_size;
 use std::path::Path;
@@ -8,11 +9,12 @@ use vello::kurbo::{Point, Rect, Vec2};
 const ORB_FOLLOW_RATE: f64 = 2.2;
 const FADE_RATE: f64 = 4.0;
 const ORB_LINGER_SECONDS: f64 = 1.5;
-const STATUS_LINGER_SECONDS: f64 = 8.0;
 const WANDER_SPEED: f64 = 0.6;
 const WANDER_RATIO: f64 = 0.18;
 const FREE_WANDER_PX: f64 = 60.0;
 const BUSY_MESSAGE: &str = "busy, wait for the current run to finish";
+const FINISHED_MESSAGE: &str = "done";
+const FAILED_MESSAGE: &str = "failed";
 
 pub fn submit_prompt(state: &mut State) {
     let prompt = state.prompt.text().trim().to_string();
@@ -21,13 +23,13 @@ pub fn submit_prompt(state: &mut State) {
     }
     let session = &mut state.agent_session;
     if session.get_is_working() {
-        session.last_message = Some(BUSY_MESSAGE.to_string());
+        session.feed.push(FeedKind::Failure, BUSY_MESSAGE);
         return;
     }
     state.prompt.clear();
     session.process = Some(AgentProcess::spawn(&prompt, &state.repository_root));
     session.status = AgentStatus::Working;
-    session.last_message = Some(first_line(&prompt));
+    session.feed.push(FeedKind::Prompt, &prompt);
     session.focus_path = None;
     session.idle_seconds = 0.0;
 }
@@ -40,9 +42,7 @@ pub fn update_agent(state: &mut State) {
         true => 0.0,
         false => session.idle_seconds + delta_time,
     };
-    let is_status_visible = session.status != AgentStatus::Idle
-        && (session.get_is_working() || session.idle_seconds < STATUS_LINGER_SECONDS);
-    session.status_visibility = approach(session.status_visibility, is_status_visible, delta_time);
+    session.feed.update(delta_time);
     animate_orb(state);
 }
 
@@ -66,12 +66,12 @@ fn poll_process(session: &mut AgentSession) {
 
 fn apply_event(session: &mut AgentSession, event: AgentEvent) {
     match event {
-        AgentEvent::Text(text) => session.last_message = Some(first_line(&text)),
+        AgentEvent::Text(text) => session.feed.push(FeedKind::Message, &text),
         AgentEvent::ToolUse { tool, paths } => {
-            session.last_message = Some(describe_tool_use(
-                &tool,
-                paths.first().map(|path| path.as_path()),
-            ));
+            session.feed.push(
+                FeedKind::ToolUse,
+                &describe_tool_use(&tool, paths.first().map(|path| path.as_path())),
+            );
             if let Some(path) = paths.into_iter().next() {
                 session.focus_path = Some(path);
             }
@@ -84,13 +84,35 @@ fn apply_event(session: &mut AgentSession, event: AgentEvent) {
                 true => AgentStatus::Succeeded,
                 false => AgentStatus::Failed,
             };
-            session.last_message = summary.map(|summary| first_line(&summary));
+            push_finish_entry(session, is_success, summary);
         }
         AgentEvent::Failed(message) => {
             session.status = AgentStatus::Failed;
-            session.last_message = Some(first_line(&message));
+            session.feed.push(FeedKind::Failure, &message);
         }
     }
+}
+
+fn push_finish_entry(session: &mut AgentSession, is_success: bool, summary: Option<String>) {
+    let kind = match is_success {
+        true => FeedKind::Success,
+        false => FeedKind::Failure,
+    };
+    let last_message = session
+        .feed
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| entry.kind == FeedKind::Message)
+        .map(|entry| entry.text.clone());
+    let summary = summary.unwrap_or_default();
+    let is_repeated = last_message.is_some_and(|message| message == summary.trim());
+    let text = match (is_success, summary.trim().is_empty() || is_repeated) {
+        (true, true) => FINISHED_MESSAGE.to_string(),
+        (false, true) => FAILED_MESSAGE.to_string(),
+        (_, false) => summary,
+    };
+    session.feed.push(kind, &text);
 }
 
 fn animate_orb(state: &mut State) {
@@ -155,12 +177,4 @@ fn describe_tool_use(tool: &str, path: Option<&Path>) -> String {
         Some(path) => format!("{tool} {}", path.display()),
         None => tool.to_string(),
     }
-}
-
-fn first_line(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
-        .to_string()
 }

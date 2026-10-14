@@ -1,13 +1,15 @@
-use crate::resources::agent_session::{AgentSession, AgentStatus};
+use crate::resources::agent_feed::{AgentFeed, ENTRY_LIFETIME_SECONDS, FeedEntry, FeedKind};
 use crate::resources::prompt::Prompt;
 use crate::resources::text::ColorBrush;
 use crate::resources::text::{FontRole, TextEngine};
 use crate::systems::render::FrameContext;
-use crate::systems::render::palette::{FAILURE, INK, INK_DIM, ORB_GLOW, PANEL, SHADOW, SUCCESS};
+use crate::systems::render::palette::{
+    ACCENT, FAILURE, INK, INK_DIM, ORB_GLOW, PANEL, SHADOW, SUCCESS,
+};
 use crate::systems::render::text::draw_layout;
 use parley::Layout;
 use vello::Scene;
-use vello::kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
+use vello::kurbo::{Affine, Point, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
 
 const PROMPT_MAX_WIDTH_PX: f64 = 760.0;
@@ -19,10 +21,18 @@ const PROMPT_FONT_PX: f32 = 18.0;
 const PROMPT_TEXT_INSET_PX: f64 = 22.0;
 const PROMPT_SLIDE_PX: f64 = 24.0;
 const HINT_FONT_PX: f32 = 13.0;
-const STATUS_TOP_MARGIN_PX: f64 = 24.0;
-const STATUS_HEIGHT_PX: f64 = 38.0;
-const STATUS_FONT_PX: f32 = 14.0;
-const STATUS_MAX_CHARACTERS: usize = 90;
+const FEED_SIDE_MARGIN_PX: f64 = 24.0;
+const FEED_BOTTOM_MARGIN_PX: f64 = 24.0;
+const FEED_PADDING_PX: f64 = 12.0;
+const FEED_GAP_PX: f64 = 8.0;
+const FEED_RADIUS_PX: f64 = 10.0;
+const FEED_FONT_PX: f32 = 14.0;
+const FEED_ACCENT_PX: f64 = 3.0;
+const FEED_ACCENT_INSET_PX: f64 = 6.0;
+const FEED_SLIDE_RATE: f64 = 12.0;
+const FEED_ENTRY_SLIDE_PX: f64 = 18.0;
+const FEED_FADE_IN_SECONDS: f64 = 0.35;
+const FEED_FADE_OUT_SECONDS: f64 = 1.5;
 const SEND_HINT: &str = "enter to send · esc to clear";
 
 pub struct OverlayPainter<'a> {
@@ -38,13 +48,7 @@ impl OverlayPainter<'_> {
             return;
         }
         let scale = self.frame.scale_factor;
-        let viewport = self.frame.viewport;
-        let width =
-            (viewport.width - PROMPT_SIDE_MARGIN_PX * 2.0 * scale).min(PROMPT_MAX_WIDTH_PX * scale);
-        let height = PROMPT_HEIGHT_PX * scale;
-        let slide = (1.0 - ease_out(visibility)) * PROMPT_SLIDE_PX * scale;
-        let top = viewport.height - PROMPT_BOTTOM_MARGIN_PX * scale - height + slide;
-        let rect = Rect::from_origin_size(((viewport.width - width) * 0.5, top), (width, height));
+        let rect = self.compute_prompt_rect(visibility);
         let alpha = visibility as f32;
         self.draw_panel(rect, PROMPT_RADIUS_PX * scale, alpha);
         let text_rect = rect.inset(-PROMPT_TEXT_INSET_PX * scale);
@@ -88,52 +92,43 @@ impl OverlayPainter<'_> {
         self.scene.pop_layer();
     }
 
-    pub fn draw_status(&mut self, session: &AgentSession) {
-        let visibility = session.status_visibility;
-        if visibility <= 0.01 {
-            return;
-        }
+    pub fn draw_feed(&mut self, feed: &mut AgentFeed, prompt_visibility: f64) {
         let scale = self.frame.scale_factor;
-        let alpha = visibility as f32;
-        let message = status_message(session);
-        let layout = self.text_engine.layout_label(
-            &message,
-            STATUS_FONT_PX * scale as f32,
-            FontRole::Interface,
-            500.0,
-        );
-        let height = STATUS_HEIGHT_PX * scale;
-        let dot_space = height * 0.9;
-        let width = layout.width() as f64 + dot_space + height * 0.6;
-        let slide = (1.0 - ease_out(visibility)) * -PROMPT_SLIDE_PX * scale;
-        let rect = Rect::from_origin_size(
-            (
-                (self.frame.viewport.width - width) * 0.5,
-                STATUS_TOP_MARGIN_PX * scale + slide,
-            ),
-            (width, height),
-        );
-        self.draw_panel(rect, height * 0.5, alpha);
-        let dot_center = Point::new(rect.x0 + height * 0.55, rect.center().y);
-        let pulse = (session.orb.phase * 3.0).sin() * 0.5 + 0.5;
-        let dot_color = status_color(session.status);
-        self.scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            dot_color.multiply_alpha(alpha * (0.6 + 0.4 * pulse as f32)),
-            None,
-            &Circle::new(dot_center, 4.5 * scale),
-        );
-        let text_origin = Point::new(
-            rect.x0 + dot_space,
-            rect.center().y - layout.height() as f64 * 0.5,
-        );
-        draw_layout(
-            self.scene,
-            &layout,
-            Affine::translate(text_origin.to_vec2()),
-            INK.multiply_alpha(alpha),
-        );
+        let padding = FEED_PADDING_PX * scale;
+        let left = FEED_SIDE_MARGIN_PX * scale;
+        let blend = 1.0 - (-FEED_SLIDE_RATE * self.frame.delta_time).exp();
+        let widest_card = feed
+            .entries
+            .iter_mut()
+            .map(|entry| self.measure_entry(entry).0)
+            .fold(0.0, f64::max)
+            + padding * 2.0
+            + FEED_ACCENT_PX * scale;
+        let mut bottom = self.frame.viewport.height
+            - FEED_BOTTOM_MARGIN_PX * scale
+            - self.compute_prompt_clearance(left + widest_card, prompt_visibility);
+        for entry in feed.entries.iter_mut().rev() {
+            let (text_width, text_height) = self.measure_entry(entry);
+            let card_height = text_height + padding * 2.0;
+            let target_top = bottom - card_height;
+            let top = match entry.offset_y {
+                Some(current) => current + (target_top - current) * blend,
+                None => target_top + FEED_ENTRY_SLIDE_PX * scale,
+            };
+            entry.offset_y = Some(top);
+            bottom = target_top - FEED_GAP_PX * scale;
+            if top + card_height < 0.0 {
+                continue;
+            }
+            let card = Rect::from_origin_size(
+                (left, top),
+                (
+                    text_width + padding * 2.0 + FEED_ACCENT_PX * scale,
+                    card_height,
+                ),
+            );
+            self.draw_feed_card(entry, card, feed_entry_alpha(entry.age_seconds));
+        }
     }
 
     pub fn draw_notice(&mut self, message: &str, alpha: f32) {
@@ -150,6 +145,82 @@ impl OverlayPainter<'_> {
             &layout,
             Affine::translate(origin.to_vec2()),
             INK.multiply_alpha(alpha),
+        );
+    }
+
+    fn compute_prompt_rect(&self, visibility: f64) -> Rect {
+        let scale = self.frame.scale_factor;
+        let viewport = self.frame.viewport;
+        let width =
+            (viewport.width - PROMPT_SIDE_MARGIN_PX * 2.0 * scale).min(PROMPT_MAX_WIDTH_PX * scale);
+        let height = PROMPT_HEIGHT_PX * scale;
+        let slide = (1.0 - ease_out(visibility)) * PROMPT_SLIDE_PX * scale;
+        let top = viewport.height - PROMPT_BOTTOM_MARGIN_PX * scale - height + slide;
+        Rect::from_origin_size(((viewport.width - width) * 0.5, top), (width, height))
+    }
+
+    fn compute_prompt_clearance(&self, feed_right: f64, prompt_visibility: f64) -> f64 {
+        let prompt_rect = self.compute_prompt_rect(1.0);
+        if feed_right < prompt_rect.x0 {
+            return 0.0;
+        }
+        let clearance = self.frame.viewport.height - prompt_rect.y0
+            + FEED_GAP_PX * self.frame.scale_factor
+            - FEED_BOTTOM_MARGIN_PX * self.frame.scale_factor;
+        clearance * ease_out(prompt_visibility)
+    }
+
+    fn measure_entry(&mut self, entry: &mut FeedEntry) -> (f64, f64) {
+        let scale = self.frame.scale_factor;
+        let is_stale = entry
+            .layout
+            .as_ref()
+            .is_none_or(|(layout_scale, _)| *layout_scale != scale);
+        if is_stale {
+            let (_, _, role) = feed_style(entry.kind);
+            let layout = self.text_engine.layout_label(
+                &entry.text,
+                FEED_FONT_PX * scale as f32,
+                role,
+                450.0,
+            );
+            entry.layout = Some((scale, layout));
+        }
+        let (_, layout) = entry.layout.as_ref().expect("feed layout was just built");
+        (layout.width() as f64, layout.height() as f64)
+    }
+
+    fn draw_feed_card(&mut self, entry: &FeedEntry, card: Rect, alpha: f32) {
+        let Some((_, layout)) = entry.layout.as_ref() else {
+            return;
+        };
+        let scale = self.frame.scale_factor;
+        let (accent, text_color, _) = feed_style(entry.kind);
+        self.draw_panel(card, FEED_RADIUS_PX * scale, alpha * 0.9);
+        let accent_bar = RoundedRect::new(
+            card.x0 + FEED_ACCENT_INSET_PX * scale,
+            card.y0 + FEED_ACCENT_INSET_PX * scale * 2.0,
+            card.x0 + (FEED_ACCENT_INSET_PX + FEED_ACCENT_PX) * scale,
+            card.y1 - FEED_ACCENT_INSET_PX * scale * 2.0,
+            FEED_ACCENT_PX * scale,
+        );
+        self.scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            accent.multiply_alpha(alpha),
+            None,
+            &accent_bar,
+        );
+        let padding = FEED_PADDING_PX * scale;
+        let text_origin = Point::new(
+            card.x0 + padding + FEED_ACCENT_PX * scale,
+            card.y0 + padding,
+        );
+        draw_layout(
+            self.scene,
+            layout,
+            Affine::translate(text_origin.to_vec2()),
+            text_color.multiply_alpha(alpha),
         );
     }
 
@@ -210,32 +281,19 @@ impl OverlayPainter<'_> {
     }
 }
 
-fn status_message(session: &AgentSession) -> String {
-    let prefix = match session.status {
-        AgentStatus::Working => "claude is working",
-        AgentStatus::Succeeded => "claude finished",
-        AgentStatus::Failed => "claude failed",
-        AgentStatus::Idle => "claude",
-    };
-    let message = match &session.last_message {
-        Some(detail) => format!("{prefix} — {detail}"),
-        None => prefix.to_string(),
-    };
-    truncate(&message, STATUS_MAX_CHARACTERS)
+fn feed_entry_alpha(age_seconds: f64) -> f32 {
+    let fade_in = (age_seconds / FEED_FADE_IN_SECONDS).clamp(0.0, 1.0);
+    let fade_out = ((ENTRY_LIFETIME_SECONDS - age_seconds) / FEED_FADE_OUT_SECONDS).clamp(0.0, 1.0);
+    (ease_out(fade_in) * fade_out) as f32
 }
 
-fn status_color(status: AgentStatus) -> Color {
-    match status {
-        AgentStatus::Succeeded => SUCCESS,
-        AgentStatus::Failed => FAILURE,
-        _ => ORB_GLOW,
-    }
-}
-
-fn truncate(text: &str, max_characters: usize) -> String {
-    match text.chars().count() > max_characters {
-        true => format!("{}…", text.chars().take(max_characters).collect::<String>()),
-        false => text.to_string(),
+fn feed_style(kind: FeedKind) -> (Color, Color, FontRole) {
+    match kind {
+        FeedKind::Prompt => (ACCENT, INK, FontRole::Interface),
+        FeedKind::Message => (ORB_GLOW, INK, FontRole::Interface),
+        FeedKind::ToolUse => (INK_DIM, INK_DIM, FontRole::Code),
+        FeedKind::Success => (SUCCESS, INK, FontRole::Interface),
+        FeedKind::Failure => (FAILURE, INK, FontRole::Interface),
     }
 }
 

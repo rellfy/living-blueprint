@@ -1,14 +1,14 @@
 use crate::agent::AgentProcess;
+use crate::resources::agent_feed::AgentFeed;
 use std::path::PathBuf;
 use vello::kurbo::{Point, Vec2};
 
 pub struct AgentSession {
     pub process: Option<AgentProcess>,
     pub status: AgentStatus,
-    pub last_message: Option<String>,
     pub focus_path: Option<PathBuf>,
     pub orb: Orb,
-    pub status_visibility: f64,
+    pub feed: AgentFeed,
     pub idle_seconds: f64,
 }
 
@@ -33,7 +33,6 @@ impl AgentSession {
         Self {
             process: None,
             status: AgentStatus::Idle,
-            last_message: None,
             focus_path: None,
             orb: Orb {
                 position: Point::ZERO,
@@ -42,7 +41,7 @@ impl AgentSession {
                 phase: 0.0,
                 is_placed: false,
             },
-            status_visibility: 0.0,
+            feed: AgentFeed::default(),
             idle_seconds: 0.0,
         }
     }
