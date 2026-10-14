@@ -4,9 +4,10 @@ use crate::resources::text::{ColorBrush, FontRole, TextEngine};
 use crate::systems::render::palette::{INK, highlight_color};
 use parley::Layout;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use vello::kurbo::{BezPath, Rect, Shape};
 
-const CODE_LAYOUTS_PER_FRAME: usize = 3;
+const CODE_LAYOUT_FRAME_BUDGET: Duration = Duration::from_millis(4);
 const LINE_BAR_HEIGHT_RATIO: f64 = 0.55;
 
 #[derive(Default)]
@@ -14,7 +15,7 @@ pub struct RenderCache {
     code_layouts: HashMap<NodeId, Layout<ColorBrush>>,
     line_bars: HashMap<NodeId, BezPath>,
     labels: HashMap<LabelKey, Layout<ColorBrush>>,
-    code_layout_budget: usize,
+    code_layout_deadline: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -50,7 +51,7 @@ impl RenderCache {
     }
 
     pub fn begin_frame(&mut self) {
-        self.code_layout_budget = CODE_LAYOUTS_PER_FRAME;
+        self.code_layout_deadline = None;
     }
 
     pub fn code_layout(
@@ -60,10 +61,12 @@ impl RenderCache {
         text_engine: &mut TextEngine,
     ) -> Option<&Layout<ColorBrush>> {
         if !self.code_layouts.contains_key(&id) {
-            if self.code_layout_budget == 0 {
+            let deadline = *self
+                .code_layout_deadline
+                .get_or_insert_with(|| Instant::now() + CODE_LAYOUT_FRAME_BUDGET);
+            if Instant::now() > deadline {
                 return None;
             }
-            self.code_layout_budget -= 1;
             let layout = build_code_layout(node, text_engine)?;
             self.code_layouts.insert(id, layout);
         }
