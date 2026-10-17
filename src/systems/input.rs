@@ -14,7 +14,6 @@ pub fn handle_cursor_moved(state: &mut State, position: Point) {
     let Some(delta) = state.pointer.move_to(position) else {
         return;
     };
-    state.semantic_zoom.release_anchor();
     state.camera.pan_by_screen(delta);
 }
 
@@ -32,7 +31,6 @@ pub fn handle_mouse_wheel(state: &mut State, delta: MouseScrollDelta) {
         MouseScrollDelta::LineDelta(_, lines) => ZOOM_PER_LINE.powf(lines as f64),
         MouseScrollDelta::PixelDelta(pixels) => ZOOM_PER_PIXEL.powf(pixels.y),
     };
-    state.semantic_zoom.release_anchor();
     let viewport = viewport_size(state);
     state
         .camera

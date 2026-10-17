@@ -24,7 +24,6 @@ fn install_repository(state: &mut State, mut repository: Repository, changed_pat
         repository.inherit(previous);
         state.render_state.cache.migrate(previous, &repository);
     }
-    state.semantic_zoom.reset();
     if state.repository.is_none() {
         let readable_zoom = state.window.scale_factor();
         state

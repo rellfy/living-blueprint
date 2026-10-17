@@ -16,7 +16,7 @@ use crate::systems::prompt::update_prompt;
 use crate::systems::render::render;
 use crate::systems::render::state::RenderState;
 use crate::systems::repository_sync::update_repository;
-use crate::systems::semantic_zoom::{SemanticZoomState, update_semantic_zoom};
+use crate::systems::semantic_zoom::update_semantic_zoom;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -44,7 +44,6 @@ pub struct State {
     pub repository_sync: RepositorySync,
     pub load_error: Option<String>,
     pub hovered: Option<NodeId>,
-    pub semantic_zoom: SemanticZoomState,
     pub start_time: Instant,
     pub last_frame_time: Instant,
     pub delta_time: f64,
@@ -73,7 +72,6 @@ impl State {
             repository_sync,
             load_error: None,
             hovered: None,
-            semantic_zoom: SemanticZoomState::default(),
             start_time: Instant::now(),
             last_frame_time: Instant::now(),
             delta_time: 0.0,
