@@ -11,7 +11,7 @@ use crate::systems::render::text::{draw_layout, draw_layout_lines};
 use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
 use std::collections::HashSet;
 use vello::Scene;
-use vello::kurbo::{Affine, Line, Point, Rect, RoundedRect, Stroke, Vec2};
+use vello::kurbo::{Affine, BezPath, Line, Point, Rect, RoundedRect, Shape, Stroke, Vec2};
 use vello::peniko::{Color, Fill};
 
 const MIN_NODE_SCREEN_SIZE: f64 = 2.0;
@@ -79,10 +79,7 @@ impl MapPainter<'_> {
     }
 
     fn draw_directory(&mut self, id: NodeId, node: &Node) {
-        let stroke_color = match self.check_is_highlighted(id) {
-            true => ACCENT,
-            false => INK.multiply_alpha(0.55),
-        };
+        let stroke_color = self.pick_stroke(id, INK.multiply_alpha(0.55));
         self.draw_box(node.rect, DIRECTORY_FILL, stroke_color);
         self.draw_separator(node.rect, node.header_height, 0.25);
         for child in &node.children {
@@ -93,10 +90,11 @@ impl MapPainter<'_> {
 
     fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas();
-        let (fill, stroke) = match self.check_is_highlighted(id) {
-            true => (COLLAPSED_DIRECTORY_FILL_HOVERED, ACCENT),
-            false => (COLLAPSED_DIRECTORY_FILL, INK.multiply_alpha(0.75)),
+        let fill = match self.hovered == Some(id) {
+            true => COLLAPSED_DIRECTORY_FILL_HOVERED,
+            false => COLLAPSED_DIRECTORY_FILL,
         };
+        let stroke = self.pick_stroke(id, INK.multiply_alpha(0.75));
         self.draw_box(node.rect, fill, stroke);
         self.draw_separator(node.rect, node.header_height, 0.3 * code_alpha as f32);
         self.draw_line_bars(id, node, bars_alpha);
@@ -106,10 +104,11 @@ impl MapPainter<'_> {
 
     fn draw_file(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas();
-        let (fill, stroke) = match self.check_is_highlighted(id) {
-            true => (FILE_FILL_HOVERED, ACCENT),
-            false => (FILE_FILL, INK.multiply_alpha(0.75)),
+        let fill = match self.hovered == Some(id) {
+            true => FILE_FILL_HOVERED,
+            false => FILE_FILL,
         };
+        let stroke = self.pick_stroke(id, INK.multiply_alpha(0.75));
         self.draw_box(node.rect, fill, stroke);
         let has_body = node.body().is_some();
         let separator_alpha = match has_body {
@@ -126,20 +125,37 @@ impl MapPainter<'_> {
         }
     }
 
-    fn check_is_highlighted(&self, id: NodeId) -> bool {
-        self.hovered == Some(id) || self.linked.contains(&id)
+    fn pick_stroke(&self, id: NodeId, idle: Color) -> Color {
+        let is_highlighted = self.hovered == Some(id) || self.linked.contains(&id);
+        match is_highlighted {
+            true => ACCENT,
+            false => idle,
+        }
     }
 
     fn draw_link_glow(&mut self, rect: Rect) {
-        let world_px = self.frame.scale_factor / self.frame.zoom;
-        let radius = (CORNER_RADIUS_PX * world_px).min(rect.width().min(rect.height()) * 0.08);
+        let std_dev = LINK_GLOW_PX * self.frame.scale_factor / self.frame.zoom;
+        let radius = self.compute_corner_radius(rect);
+        let mut outside = BezPath::new();
+        outside.extend(
+            rect.inflate(std_dev * 2.5, std_dev * 2.5)
+                .path_elements(0.1),
+        );
+        outside.extend(RoundedRect::from_rect(rect, radius).path_elements(0.1));
+        self.scene
+            .push_clip_layer(Fill::EvenOdd, self.frame.transform, &outside);
         self.scene.draw_blurred_rounded_rect(
             self.frame.transform,
             rect,
             ACCENT.multiply_alpha(LINK_GLOW_ALPHA),
             radius,
-            LINK_GLOW_PX * world_px,
+            std_dev,
         );
+        self.scene.pop_layer();
+    }
+
+    fn compute_corner_radius(&self, rect: Rect) -> f64 {
+        (CORNER_RADIUS_PX / self.frame.zoom).min(rect.width().min(rect.height()) * 0.08)
     }
 
     fn compute_body_alphas(&self) -> (f64, f64) {
@@ -161,7 +177,7 @@ impl MapPainter<'_> {
 
     fn draw_box(&mut self, rect: Rect, fill: Color, stroke: Color) {
         let zoom = self.frame.zoom;
-        let radius = (CORNER_RADIUS_PX / zoom).min(rect.width().min(rect.height()) * 0.08);
+        let radius = self.compute_corner_radius(rect);
         let shape = RoundedRect::from_rect(rect, radius);
         self.scene
             .fill(Fill::NonZero, self.frame.transform, fill, None, &shape);
