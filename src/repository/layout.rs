@@ -15,11 +15,6 @@ pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
 pub const GRID_UNIT: f64 = 25.0;
 const COLUMN_RATIO: f64 = 1.6;
 const MIN_COLLAPSED_COLUMNS: f64 = 12.0;
-const DIRECTORY_HEADER_RATIO: f64 = 0.03;
-const DIRECTORY_PADDING_RATIO: f64 = 0.45;
-const MAX_CHILD_GAP: f64 = 40.0;
-const MIN_CHILD_GAP: f64 = 12.0;
-const CHILD_GAP_RATIO: f64 = 0.4;
 
 struct Measurement {
     size: Size,
@@ -146,10 +141,9 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
 }
 
 fn measure_directory(child_sizes: &[Size]) -> Measurement {
-    let (content_size, offsets) = pack_table(child_sizes);
-    let header_height =
-        snap(content_size.width * DIRECTORY_HEADER_RATIO).max(snap(MIN_DIRECTORY_HEADER_HEIGHT));
-    let padding = snap(header_height * DIRECTORY_PADDING_RATIO);
+    let (content_size, offsets) = pack_grid(child_sizes);
+    let header_height = snap(MIN_DIRECTORY_HEADER_HEIGHT);
+    let padding = GRID_UNIT;
     let content_origin = Vec2::new(padding, header_height);
     Measurement {
         size: Size::new(
@@ -164,61 +158,37 @@ fn measure_directory(child_sizes: &[Size]) -> Measurement {
     }
 }
 
-fn pack_table(sizes: &[Size]) -> (Size, Vec<Vec2>) {
+fn pack_grid(sizes: &[Size]) -> (Size, Vec<Vec2>) {
     let column_count = compute_column_count(sizes.len());
-    let gap = compute_gap(sizes);
-    let mut column_widths = vec![0.0_f64; column_count];
-    let mut row_heights = vec![0.0_f64; sizes.len().div_ceil(column_count)];
+    let mut placed: Vec<Rect> = Vec::with_capacity(sizes.len());
     for (index, size) in sizes.iter().enumerate() {
-        let column = index % column_count;
-        let row = index / column_count;
-        column_widths[column] = column_widths[column].max(size.width);
-        row_heights[row] = row_heights[row].max(size.height);
+        let left = (index % column_count != 0).then(|| placed[index - 1]);
+        let above = index.checked_sub(column_count).map(|above| placed[above]);
+        let row_start = index - index % column_count;
+        let x = left.map_or(0.0, |left| left.x1 + GRID_UNIT);
+        let span = (x, x + size.width);
+        let y = placed[..row_start]
+            .iter()
+            .filter(|rect| check_overlaps_horizontally(**rect, span))
+            .chain(above.iter())
+            .map(|rect| rect.y1 + GRID_UNIT)
+            .fold(0.0, f64::max);
+        placed.push(Rect::from_origin_size(Point::new(x, y), *size));
     }
-    let column_offsets = accumulate_offsets(&column_widths, gap);
-    let row_offsets = accumulate_offsets(&row_heights, gap);
-    let offsets = (0..sizes.len())
-        .map(|index| {
-            Vec2::new(
-                column_offsets[index % column_count],
-                row_offsets[index / column_count],
-            )
-        })
-        .collect();
-    let content_size = Size::new(
-        compute_span(&column_widths, gap),
-        compute_span(&row_heights, gap),
-    );
+    let content_size = placed.iter().fold(Size::ZERO, |size, rect| {
+        Size::new(size.width.max(rect.x1), size.height.max(rect.y1))
+    });
+    let offsets = placed.iter().map(|rect| rect.origin().to_vec2()).collect();
     (content_size, offsets)
+}
+
+fn check_overlaps_horizontally(rect: Rect, span: (f64, f64)) -> bool {
+    rect.x0 < span.1 + GRID_UNIT && span.0 < rect.x1 + GRID_UNIT
 }
 
 pub fn compute_column_count(child_count: usize) -> usize {
     let column_count = (child_count as f64 * COLUMN_RATIO).sqrt().ceil() as usize;
     column_count.clamp(1, child_count.max(1))
-}
-
-fn accumulate_offsets(extents: &[f64], gap: f64) -> Vec<f64> {
-    extents
-        .iter()
-        .scan(0.0, |cursor, extent| {
-            let offset = *cursor;
-            *cursor += extent + gap;
-            Some(offset)
-        })
-        .collect()
-}
-
-fn compute_span(extents: &[f64], gap: f64) -> f64 {
-    let total: f64 = extents.iter().sum();
-    total + gap * extents.len().saturating_sub(1) as f64
-}
-
-fn compute_gap(sizes: &[Size]) -> f64 {
-    let smallest = sizes
-        .iter()
-        .map(|size| size.height)
-        .fold(f64::INFINITY, f64::min);
-    snap((smallest * CHILD_GAP_RATIO).clamp(MIN_CHILD_GAP, MAX_CHILD_GAP))
 }
 
 fn snap_size(size: Size) -> Size {

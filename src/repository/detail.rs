@@ -180,8 +180,8 @@ mod tests {
             let above = index
                 .checked_sub(column_count)
                 .map(|above| repository.node(children[above]).target_rect);
-            assert!(left.is_none_or(|left| left.x1 <= rect.x0 && left.y0 == rect.y0));
-            assert!(above.is_none_or(|above| above.y1 <= rect.y0 && above.x0 == rect.x0));
+            assert!(left.is_none_or(|left| left.x1 <= rect.x0));
+            assert!(above.is_none_or(|above| above.y1 <= rect.y0));
         }
     }
 

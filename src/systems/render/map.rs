@@ -27,6 +27,7 @@ const CODE_FADE_END_PX: f64 = 9.0;
 const BARS_FADE_START_PX: f64 = 0.3;
 const BARS_FADE_END_PX: f64 = 0.9;
 const DIRECTORY_LABEL_RATIO: f64 = 0.5;
+const DIRECTORY_LABEL_HEADER_FIT: f64 = 0.7;
 const MIN_LABEL_PX: f64 = 4.5;
 const MAX_DIRECTORY_LABEL_PX: f64 = 30.0;
 const MIN_DIRECTORY_LABEL_PX: f64 = 12.0;
@@ -309,7 +310,8 @@ impl MapPainter<'_> {
             preferred_size.min(fitting_size),
             MAX_DIRECTORY_LABEL_PX,
             self.frame,
-        );
+        )
+        .min(node.header_height * DIRECTORY_LABEL_HEADER_FIT);
         let inset = node.header_height * 0.45;
         let origin = Point::new(
             node.rect.x0 + inset,
