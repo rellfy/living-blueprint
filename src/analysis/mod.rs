@@ -4,6 +4,7 @@ use std::path::Path;
 
 mod highlight;
 mod language;
+mod outline;
 mod tags;
 
 #[derive(Debug, Clone, Default)]
@@ -11,6 +12,16 @@ pub struct FileAnalysis {
     pub highlights: Vec<HighlightSpan>,
     pub definitions: Vec<Symbol>,
     pub references: Vec<Symbol>,
+    pub outline: Vec<OutlineItem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OutlineItem {
+    pub depth: usize,
+    pub line: usize,
+    pub signature: String,
+    pub child_count: usize,
+    pub is_constant: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -61,11 +72,23 @@ pub fn analyse(path: &Path, source: &str) -> Option<FileAnalysis> {
     let language = Language::detect(path)?;
     let highlights = highlight::highlight(language, source);
     let (definitions, references) = tags::extract_symbols(language, source);
+    let outline = outline::extract_outline(language, source);
     Some(FileAnalysis {
         highlights,
         definitions,
         references,
+        outline,
     })
+}
+
+pub fn highlight_text(path: &Path, text: &str) -> Vec<HighlightSpan> {
+    Language::detect(path)
+        .map(|language| highlight::highlight(language, text))
+        .unwrap_or_default()
+}
+
+pub fn line_comment(path: &Path) -> Option<&'static str> {
+    Language::detect(path).map(Language::line_comment)
 }
 
 #[cfg(test)]
@@ -147,6 +170,57 @@ mod tests {
             assert!(!analysis.highlights.is_empty(), "{name}");
             assert!(!analysis.definitions.is_empty(), "{name}");
         }
+    }
+
+    #[test]
+    fn rust_outline_nests_impl_methods() {
+        let source = "pub struct Camera {\n    zoom: f64,\n}\n\nimpl Camera {\n    \
+            pub fn new(\n        zoom: f64,\n    ) -> Self {\n        Self { zoom }\n    }\n}\n\n\
+            const LIMIT: usize = 3;\n";
+        let analysis = analyse(Path::new("camera.rs"), source).unwrap();
+        let outline: Vec<(usize, &str, usize)> = analysis
+            .outline
+            .iter()
+            .map(|item| (item.depth, item.signature.as_str(), item.child_count))
+            .collect();
+        assert_eq!(
+            outline,
+            vec![
+                (0, "pub struct Camera", 0),
+                (0, "impl Camera", 1),
+                (1, "pub fn new(zoom: f64) -> Self", 0),
+                (0, "const LIMIT: usize = 3", 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn python_outline_unwraps_decorators() {
+        let source =
+            "class A:\n    @property\n    def b(self):\n        return 1\n\ndef c(x):\n    pass\n";
+        let analysis = analyse(Path::new("a.py"), source).unwrap();
+        let signatures: Vec<&str> = analysis
+            .outline
+            .iter()
+            .map(|item| item.signature.as_str())
+            .collect();
+        assert_eq!(signatures, vec!["class A", "def b(self)", "def c(x)"]);
+    }
+
+    #[test]
+    fn typescript_outline_unwraps_exports() {
+        let source = "export class A {\n  run(): void {}\n}\nexport const b = () => 1;\n\
+            interface C { d: number }\n";
+        let analysis = analyse(Path::new("a.ts"), source).unwrap();
+        let signatures: Vec<&str> = analysis
+            .outline
+            .iter()
+            .map(|item| item.signature.as_str())
+            .collect();
+        assert_eq!(
+            signatures,
+            vec!["class A", "run(): void", "const b = () => 1", "interface C"]
+        );
     }
 
     #[test]

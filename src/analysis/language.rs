@@ -80,6 +80,13 @@ impl Language {
             .as_ref()
     }
 
+    pub fn line_comment(self) -> &'static str {
+        match self {
+            Self::Python => "#",
+            _ => "//",
+        }
+    }
+
     fn build_highlight_configuration(self) -> Option<HighlightConfiguration> {
         let queries = self.queries();
         let mut configuration = HighlightConfiguration::new(
@@ -102,7 +109,7 @@ impl Language {
         TagsConfiguration::new(self.grammar(), &queries.tags, &queries.locals).ok()
     }
 
-    fn grammar(self) -> TsLanguage {
+    pub fn grammar(self) -> TsLanguage {
         match self {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             Self::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
