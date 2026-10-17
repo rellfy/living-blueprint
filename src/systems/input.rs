@@ -2,7 +2,7 @@ use crate::State;
 use crate::resources::pointer::PointerRelease;
 use crate::resources::prompt::Motion;
 use crate::systems::agent::submit_prompt;
-use crate::systems::semantic_zoom::{PIXELS_PER_STEP, zoom_semantically};
+use crate::systems::semantic_zoom::zoom_semantically;
 use vello::kurbo::{Point, Size};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -19,26 +19,19 @@ pub fn handle_cursor_moved(state: &mut State, position: Point) {
 }
 
 pub fn handle_mouse_button(state: &mut State, button: MouseButton, element_state: ElementState) {
-    if button != MouseButton::Left {
-        return;
-    }
-    match element_state {
-        ElementState::Pressed => state.pointer.press(),
-        ElementState::Released => handle_release(state),
+    match (button, element_state) {
+        (MouseButton::Left, ElementState::Pressed) => state.pointer.press(),
+        (MouseButton::Left, ElementState::Released) => handle_release(state),
+        (MouseButton::Right, ElementState::Pressed) => zoom_semantically(state, false),
+        _ => {}
     }
 }
 
 pub fn handle_mouse_wheel(state: &mut State, delta: MouseScrollDelta) {
-    let (factor, steps) = match delta {
-        MouseScrollDelta::LineDelta(_, lines) => (ZOOM_PER_LINE.powf(lines as f64), lines as f64),
-        MouseScrollDelta::PixelDelta(pixels) => {
-            (ZOOM_PER_PIXEL.powf(pixels.y), pixels.y / PIXELS_PER_STEP)
-        }
+    let factor = match delta {
+        MouseScrollDelta::LineDelta(_, lines) => ZOOM_PER_LINE.powf(lines as f64),
+        MouseScrollDelta::PixelDelta(pixels) => ZOOM_PER_PIXEL.powf(pixels.y),
     };
-    let is_camera_forced = state.modifiers.control_key();
-    if !is_camera_forced && zoom_semantically(state, steps) {
-        return;
-    }
     state.semantic_zoom.release_anchor();
     let viewport = viewport_size(state);
     state
@@ -192,21 +185,8 @@ fn right_motion(modifiers: ModifiersState) -> Motion {
 
 fn handle_release(state: &mut State) {
     match state.pointer.release() {
-        PointerRelease::DoubleClick(position) => focus_at(state, position),
-        PointerRelease::Click => {}
+        PointerRelease::Click => zoom_semantically(state, true),
         PointerRelease::Drag(velocity) => state.camera.release_with_velocity(velocity),
         PointerRelease::None => {}
     }
-}
-
-fn focus_at(state: &mut State, screen_point: Point) {
-    let viewport = viewport_size(state);
-    let world_point = state.camera.screen_to_world(screen_point, viewport);
-    let Some(repository) = &state.repository else {
-        return;
-    };
-    let Some(id) = repository.hit_test(world_point) else {
-        return;
-    };
-    state.camera.fly_to(repository.node(id).rect, viewport);
 }
