@@ -158,7 +158,7 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use crate::repository::layout::CODE_FONT_SIZE;
-    use crate::repository::{Detail, Repository};
+    use crate::repository::{Detail, NodeId, Repository};
     use std::path::Path;
 
     fn load() -> Repository {
@@ -166,6 +166,40 @@ mod tests {
         let mut repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
         repository.set_all_details(Detail::Expanded);
         repository
+    }
+
+    fn assert_children_keep_slots(repository: &Repository, id: NodeId) {
+        let children = &repository.node(id).children;
+        let column_count = (children.len() as f64).sqrt().ceil() as usize;
+        for (index, child) in children.iter().enumerate() {
+            let rect = repository.node(*child).target_rect;
+            let left = index
+                .checked_sub(1)
+                .filter(|_| index % column_count != 0)
+                .map(|left| repository.node(children[left]).target_rect);
+            let above = index
+                .checked_sub(column_count)
+                .map(|above| repository.node(children[above]).target_rect);
+            assert!(left.is_none_or(|left| left.x1 <= rect.x0 && left.y0 == rect.y0));
+            assert!(above.is_none_or(|above| above.y1 <= rect.y0 && above.x0 == rect.x0));
+        }
+    }
+
+    #[test]
+    fn children_keep_their_slots_across_details() {
+        let mut repository = load();
+        let root = repository.root_id();
+        let src = repository.find_by_path(Path::new("src")).unwrap();
+        loop {
+            for id in [root, src] {
+                if repository.node(id).get_is_expanded_directory() {
+                    assert_children_keep_slots(&repository, id);
+                }
+            }
+            if !repository.compress(root) {
+                break;
+            }
+        }
     }
 
     #[test]

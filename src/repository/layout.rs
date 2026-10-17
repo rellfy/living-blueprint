@@ -18,7 +18,6 @@ const DIRECTORY_PADDING_RATIO: f64 = 0.45;
 const MAX_CHILD_GAP: f64 = 40.0;
 const MIN_CHILD_GAP: f64 = 12.0;
 const CHILD_GAP_RATIO: f64 = 0.4;
-const ROW_WIDTH_RATIO: f64 = 1.6;
 
 struct Measurement {
     size: Size,
@@ -142,7 +141,7 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
 }
 
 fn measure_directory(child_sizes: &[Size]) -> Measurement {
-    let (content_size, offsets) = pack_rows(child_sizes);
+    let (content_size, offsets) = pack_table(child_sizes);
     let header_height =
         (content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT);
     let padding = header_height * DIRECTORY_PADDING_RATIO;
@@ -160,31 +159,52 @@ fn measure_directory(child_sizes: &[Size]) -> Measurement {
     }
 }
 
-fn pack_rows(sizes: &[Size]) -> (Size, Vec<Vec2>) {
-    let row_width = compute_row_width(sizes);
+fn pack_table(sizes: &[Size]) -> (Size, Vec<Vec2>) {
+    let column_count = compute_column_count(sizes.len());
     let gap = compute_gap(sizes);
-    let mut offsets = Vec::with_capacity(sizes.len());
-    let mut cursor = Vec2::ZERO;
-    let mut row_height: f64 = 0.0;
-    let mut content_width: f64 = 0.0;
-    for size in sizes {
-        let is_row_full = cursor.x > 0.0 && cursor.x + size.width > row_width;
-        if is_row_full {
-            cursor = Vec2::new(0.0, cursor.y + row_height + gap);
-            row_height = 0.0;
-        }
-        offsets.push(cursor);
-        cursor.x += size.width + gap;
-        row_height = row_height.max(size.height);
-        content_width = content_width.max(cursor.x - gap);
+    let mut column_widths = vec![0.0_f64; column_count];
+    let mut row_heights = vec![0.0_f64; sizes.len().div_ceil(column_count)];
+    for (index, size) in sizes.iter().enumerate() {
+        let column = index % column_count;
+        let row = index / column_count;
+        column_widths[column] = column_widths[column].max(size.width);
+        row_heights[row] = row_heights[row].max(size.height);
     }
-    (Size::new(content_width, cursor.y + row_height), offsets)
+    let column_offsets = accumulate_offsets(&column_widths, gap);
+    let row_offsets = accumulate_offsets(&row_heights, gap);
+    let offsets = (0..sizes.len())
+        .map(|index| {
+            Vec2::new(
+                column_offsets[index % column_count],
+                row_offsets[index / column_count],
+            )
+        })
+        .collect();
+    let content_size = Size::new(
+        compute_span(&column_widths, gap),
+        compute_span(&row_heights, gap),
+    );
+    (content_size, offsets)
 }
 
-fn compute_row_width(sizes: &[Size]) -> f64 {
-    let total_area: f64 = sizes.iter().map(|size| size.area()).sum();
-    let widest = sizes.iter().map(|size| size.width).fold(0.0, f64::max);
-    (total_area.sqrt() * ROW_WIDTH_RATIO).max(widest)
+fn compute_column_count(child_count: usize) -> usize {
+    ((child_count as f64).sqrt().ceil() as usize).max(1)
+}
+
+fn accumulate_offsets(extents: &[f64], gap: f64) -> Vec<f64> {
+    extents
+        .iter()
+        .scan(0.0, |cursor, extent| {
+            let offset = *cursor;
+            *cursor += extent + gap;
+            Some(offset)
+        })
+        .collect()
+}
+
+fn compute_span(extents: &[f64], gap: f64) -> f64 {
+    let total: f64 = extents.iter().sum();
+    total + gap * extents.len().saturating_sub(1) as f64
 }
 
 fn compute_gap(sizes: &[Size]) -> f64 {
