@@ -157,7 +157,7 @@ impl Repository {
 
 #[cfg(test)]
 mod tests {
-    use crate::repository::layout::CODE_FONT_SIZE;
+    use crate::repository::layout::{CODE_FONT_SIZE, GRID_UNIT};
     use crate::repository::{Detail, NodeId, Repository};
     use std::path::Path;
 
@@ -199,6 +199,31 @@ mod tests {
             if !repository.compress(root) {
                 break;
             }
+        }
+    }
+
+    fn assert_on_grid(repository: &Repository) {
+        for node in repository.nodes() {
+            let rect = node.target_rect;
+            for edge in [
+                rect.x0,
+                rect.y0,
+                rect.x1,
+                rect.y1,
+                rect.y0 + node.header_height,
+            ] {
+                assert_eq!(edge % GRID_UNIT, 0.0, "{:?} {rect:?}", node.path);
+            }
+        }
+    }
+
+    #[test]
+    fn edges_stay_on_grid_across_details() {
+        let mut repository = load();
+        let root = repository.root_id();
+        assert_on_grid(&repository);
+        while repository.compress(root) {
+            assert_on_grid(&repository);
         }
     }
 

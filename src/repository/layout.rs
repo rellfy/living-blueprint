@@ -5,13 +5,14 @@ use vello::kurbo::{Point, Rect, Size, Vec2};
 pub const CODE_FONT_SIZE: f64 = 14.0;
 pub const LINE_HEIGHT: f64 = 20.0;
 pub const FILE_PADDING: f64 = 16.0;
-pub const FILE_HEADER_HEIGHT: f64 = 44.0;
+pub const FILE_HEADER_HEIGHT: f64 = 50.0;
 pub const FILE_HEADER_LABEL_SIZE: f64 = 16.0;
 pub const LABEL_CHARACTER_WIDTH_RATIO: f64 = 0.6;
 const MIN_FILE_COLUMNS: u32 = 24;
 pub const MAX_FILE_COLUMNS: u32 = 100;
 const BINARY_FILE_LINES: f64 = 2.0;
-pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 56.0;
+pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
+pub const GRID_UNIT: f64 = 25.0;
 const MIN_COLLAPSED_COLUMNS: f64 = 12.0;
 const DIRECTORY_HEADER_RATIO: f64 = 0.03;
 const DIRECTORY_PADDING_RATIO: f64 = 0.45;
@@ -50,8 +51,11 @@ fn measure(
         (true, _) => measure_collapsed_directory(node, char_advance),
         (false, _) => measure_file(node, char_advance),
     };
-    let size = measurement.size;
-    measurements[id.0] = Some(measurement);
+    let size = snap_size(measurement.size);
+    measurements[id.0] = Some(Measurement {
+        size,
+        ..measurement
+    });
     size
 }
 
@@ -108,7 +112,7 @@ fn measure_file(node: &Node, char_advance: f64) -> Measurement {
 }
 
 fn measure_collapsed_directory(node: &Node, char_advance: f64) -> Measurement {
-    let header_height = MIN_DIRECTORY_HEADER_HEIGHT;
+    let header_height = snap(MIN_DIRECTORY_HEADER_HEIGHT);
     let body_size = node
         .body()
         .map_or(Size::ZERO, |body| measure_body(body, char_advance));
@@ -143,8 +147,8 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
 fn measure_directory(child_sizes: &[Size]) -> Measurement {
     let (content_size, offsets) = pack_table(child_sizes);
     let header_height =
-        (content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT);
-    let padding = header_height * DIRECTORY_PADDING_RATIO;
+        snap(content_size.width * DIRECTORY_HEADER_RATIO).max(snap(MIN_DIRECTORY_HEADER_HEIGHT));
+    let padding = snap(header_height * DIRECTORY_PADDING_RATIO);
     let content_origin = Vec2::new(padding, header_height);
     Measurement {
         size: Size::new(
@@ -212,5 +216,13 @@ fn compute_gap(sizes: &[Size]) -> f64 {
         .iter()
         .map(|size| size.height)
         .fold(f64::INFINITY, f64::min);
-    (smallest * CHILD_GAP_RATIO).clamp(MIN_CHILD_GAP, MAX_CHILD_GAP)
+    snap((smallest * CHILD_GAP_RATIO).clamp(MIN_CHILD_GAP, MAX_CHILD_GAP))
+}
+
+fn snap_size(size: Size) -> Size {
+    Size::new(snap(size.width), snap(size.height))
+}
+
+fn snap(value: f64) -> f64 {
+    (value / GRID_UNIT - 1e-6).ceil().max(1.0) * GRID_UNIT
 }
