@@ -26,9 +26,10 @@ fn install_repository(state: &mut State, mut repository: Repository, changed_pat
     }
     state.semantic_zoom.reset();
     if state.repository.is_none() {
+        let readable_zoom = state.window.scale_factor();
         state
             .camera
-            .jump_to(repository.bounds(), viewport_size(state));
+            .jump_to_at_most(repository.bounds(), viewport_size(state), readable_zoom);
     }
     if state.agent_session.get_is_working() {
         let changed_file = changed_paths

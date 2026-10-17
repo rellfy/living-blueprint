@@ -153,7 +153,7 @@ fn acquire_surface_texture(state: &mut State) -> Option<SurfaceTexture> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::Repository;
+    use crate::repository::{Detail, Repository};
     use crate::resources::camera::Camera;
     use crate::resources::text::TextEngine;
     use crate::systems::render::cache::RenderCache;
@@ -174,11 +174,13 @@ mod tests {
         let view = texture.create_view(&Default::default());
         let viewport = Size::new(1280.0, 800.0);
         let mut text_engine = TextEngine::new();
-        let repository = Repository::load(
+        let mut repository = Repository::load(
             Path::new(env!("CARGO_MANIFEST_DIR")),
             text_engine.char_advance(),
         )
         .unwrap();
+        repository.set_all_details(Detail::Expanded);
+        repository.animate(10.0);
         let main_rect = repository
             .node(repository.find_by_path(Path::new("src/main.rs")).unwrap())
             .rect;
@@ -288,6 +290,7 @@ mod tests {
             text_engine.char_advance(),
         )
         .unwrap();
+        repository.set_all_details(Detail::Expanded);
         let root = repository.root_id();
         let camera_id = repository
             .find_by_path(Path::new("src/resources/camera.rs"))

@@ -80,7 +80,7 @@ impl Repository {
         let files = load_files(root)?;
         let mut repository = Self::from_files(root, files, char_advance);
         repository.edges = resolve_edges(&repository.nodes);
-        repository.relayout();
+        repository.set_all_details(Detail::Collapsed);
         repository.snap_rects();
         Ok(repository)
     }
@@ -100,6 +100,13 @@ impl Repository {
         for index in fresh_ids {
             self.nodes[index].rect = self.nodes[index].target_rect;
         }
+    }
+
+    pub fn set_all_details(&mut self, detail: Detail) {
+        for node in &mut self.nodes {
+            node.detail = detail;
+        }
+        self.relayout();
     }
 
     pub fn relayout(&mut self) {
@@ -404,13 +411,35 @@ fn root_name(root: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use crate::repository::layout::CODE_FONT_SIZE;
-    use crate::repository::{NodeKind, Repository};
+    use crate::repository::{Detail, NodeKind, Repository};
     use std::path::Path;
+
+    fn load_expanded() -> Repository {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        repository.set_all_details(Detail::Expanded);
+        repository.animate(10.0);
+        repository
+    }
+
+    #[test]
+    fn loads_fully_collapsed() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        let is_all_collapsed = repository
+            .nodes()
+            .iter()
+            .all(|node| node.detail == Detail::Collapsed);
+        assert!(is_all_collapsed);
+        assert_eq!(
+            repository.hit_test(repository.bounds().center()),
+            Some(repository.root_id())
+        );
+    }
 
     #[test]
     fn loads_own_repository_with_nested_layout() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        let repository = load_expanded();
         let main_id = repository.find_by_path(Path::new("src/main.rs")).unwrap();
         let main = repository.node(main_id);
         assert!(matches!(main.kind, NodeKind::File(_)));
@@ -423,8 +452,7 @@ mod tests {
 
     #[test]
     fn siblings_do_not_overlap() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        let repository = load_expanded();
         for node in repository.nodes() {
             for (index, first) in node.children.iter().enumerate() {
                 for second in &node.children[index + 1..] {

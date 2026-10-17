@@ -93,6 +93,12 @@ impl Camera {
         self.center = self.target_center;
     }
 
+    pub fn jump_to_at_most(&mut self, world_rect: Rect, viewport: Size, max_zoom: f64) {
+        self.jump_to(world_rect, viewport);
+        self.zoom = self.zoom.min(max_zoom);
+        self.target_zoom = self.zoom;
+    }
+
     pub fn transform(&self, viewport: Size) -> Affine {
         Affine::translate(viewport.to_vec2() * 0.5)
             * Affine::scale(self.zoom)

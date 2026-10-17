@@ -163,7 +163,9 @@ mod tests {
 
     fn load() -> Repository {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap()
+        let mut repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        repository.set_all_details(Detail::Expanded);
+        repository
     }
 
     #[test]
@@ -209,6 +211,21 @@ mod tests {
         assert_eq!(repository.hit_test(parent_rect.center()), Some(parent));
         assert!(repository.expand(parent));
         assert_eq!(repository.node(id).detail, Detail::Collapsed);
+    }
+
+    #[test]
+    fn collapsed_root_expands_fully() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut repository = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        let root = repository.root_id();
+        assert!(repository.expand(root));
+        assert_eq!(repository.node(root).detail, Detail::Expanded);
+        while repository.expand(root) {}
+        let is_all_expanded = repository
+            .nodes()
+            .iter()
+            .all(|node| node.detail == Detail::Expanded);
+        assert!(is_all_expanded);
     }
 
     #[test]
