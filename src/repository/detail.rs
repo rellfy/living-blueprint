@@ -157,7 +157,7 @@ impl Repository {
 
 #[cfg(test)]
 mod tests {
-    use crate::repository::layout::{CODE_FONT_SIZE, GRID_UNIT};
+    use crate::repository::layout::{CODE_FONT_SIZE, GRID_UNIT, compute_column_count};
     use crate::repository::{Detail, NodeId, Repository};
     use std::path::Path;
 
@@ -170,7 +170,7 @@ mod tests {
 
     fn assert_children_keep_slots(repository: &Repository, id: NodeId) {
         let children = &repository.node(id).children;
-        let column_count = (children.len() as f64).sqrt().ceil() as usize;
+        let column_count = compute_column_count(children.len());
         for (index, child) in children.iter().enumerate() {
             let rect = repository.node(*child).target_rect;
             let left = index

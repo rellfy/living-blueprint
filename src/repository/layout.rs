@@ -13,6 +13,7 @@ pub const MAX_FILE_COLUMNS: u32 = 100;
 const BINARY_FILE_LINES: f64 = 2.0;
 pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
 pub const GRID_UNIT: f64 = 25.0;
+const COLUMN_RATIO: f64 = 1.6;
 const MIN_COLLAPSED_COLUMNS: f64 = 12.0;
 const DIRECTORY_HEADER_RATIO: f64 = 0.03;
 const DIRECTORY_PADDING_RATIO: f64 = 0.45;
@@ -191,8 +192,9 @@ fn pack_table(sizes: &[Size]) -> (Size, Vec<Vec2>) {
     (content_size, offsets)
 }
 
-fn compute_column_count(child_count: usize) -> usize {
-    ((child_count as f64).sqrt().ceil() as usize).max(1)
+pub fn compute_column_count(child_count: usize) -> usize {
+    let column_count = (child_count as f64 * COLUMN_RATIO).sqrt().ceil() as usize;
+    column_count.clamp(1, child_count.max(1))
 }
 
 fn accumulate_offsets(extents: &[f64], gap: f64) -> Vec<f64> {
