@@ -9,6 +9,7 @@ use crate::systems::render::cache::{LABEL_FONT_SIZE, RenderCache};
 use crate::systems::render::palette::{ACCENT, INK, INK_DIM};
 use crate::systems::render::text::{draw_layout, draw_layout_lines};
 use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
+use std::collections::HashSet;
 use vello::Scene;
 use vello::kurbo::{Affine, Line, Point, Rect, RoundedRect, Stroke, Vec2};
 use vello::peniko::{Color, Fill};
@@ -33,6 +34,8 @@ const MAX_TILE_LABEL_PX: f64 = 24.0;
 const DEFINITION_LABEL_PX: f64 = 11.0;
 const MIN_DEFINITION_SPACING_PX: f64 = 14.0;
 const MIN_DEFINITION_FILE_WIDTH_PX: f64 = 80.0;
+const LINK_GLOW_PX: f64 = 10.0;
+const LINK_GLOW_ALPHA: f32 = 0.55;
 
 pub struct MapPainter<'a> {
     pub scene: &'a mut Scene,
@@ -41,6 +44,7 @@ pub struct MapPainter<'a> {
     pub repository: &'a Repository,
     pub frame: &'a FrameContext,
     pub hovered: Option<NodeId>,
+    pub linked: &'a HashSet<NodeId>,
 }
 
 struct LabelPlacement {
@@ -64,6 +68,9 @@ impl MapPainter<'_> {
         if node.rect.width().min(node.rect.height()) * self.frame.zoom < MIN_NODE_SCREEN_SIZE {
             return;
         }
+        if self.linked.contains(&id) {
+            self.draw_link_glow(node.rect);
+        }
         match (node.get_is_directory(), node.detail) {
             (true, Detail::Expanded) => self.draw_directory(id, node),
             (true, _) => self.draw_collapsed_directory(id, node),
@@ -72,7 +79,7 @@ impl MapPainter<'_> {
     }
 
     fn draw_directory(&mut self, id: NodeId, node: &Node) {
-        let stroke_color = match self.hovered == Some(id) {
+        let stroke_color = match self.check_is_highlighted(id) {
             true => ACCENT,
             false => INK.multiply_alpha(0.55),
         };
@@ -86,7 +93,7 @@ impl MapPainter<'_> {
 
     fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas();
-        let (fill, stroke) = match self.hovered == Some(id) {
+        let (fill, stroke) = match self.check_is_highlighted(id) {
             true => (COLLAPSED_DIRECTORY_FILL_HOVERED, ACCENT),
             false => (COLLAPSED_DIRECTORY_FILL, INK.multiply_alpha(0.75)),
         };
@@ -99,8 +106,7 @@ impl MapPainter<'_> {
 
     fn draw_file(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas();
-        let is_hovered = self.hovered == Some(id);
-        let (fill, stroke) = match is_hovered {
+        let (fill, stroke) = match self.check_is_highlighted(id) {
             true => (FILE_FILL_HOVERED, ACCENT),
             false => (FILE_FILL, INK.multiply_alpha(0.75)),
         };
@@ -118,6 +124,22 @@ impl MapPainter<'_> {
         if node.detail == Detail::Expanded {
             self.draw_definitions(node, bars_alpha, tile_label_bottom);
         }
+    }
+
+    fn check_is_highlighted(&self, id: NodeId) -> bool {
+        self.hovered == Some(id) || self.linked.contains(&id)
+    }
+
+    fn draw_link_glow(&mut self, rect: Rect) {
+        let world_px = self.frame.scale_factor / self.frame.zoom;
+        let radius = (CORNER_RADIUS_PX * world_px).min(rect.width().min(rect.height()) * 0.08);
+        self.scene.draw_blurred_rounded_rect(
+            self.frame.transform,
+            rect,
+            ACCENT.multiply_alpha(LINK_GLOW_ALPHA),
+            radius,
+            LINK_GLOW_PX * world_px,
+        );
     }
 
     fn compute_body_alphas(&self) -> (f64, f64) {

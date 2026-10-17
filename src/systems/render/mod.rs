@@ -1,6 +1,6 @@
 use crate::State;
 use crate::systems::render::background::draw_background;
-use crate::systems::render::edges::draw_edges;
+use crate::systems::render::edges::{collect_linked_nodes, draw_edges};
 use crate::systems::render::map::MapPainter;
 use crate::systems::render::orb::draw_orb;
 use crate::systems::render::overlay::OverlayPainter;
@@ -57,6 +57,7 @@ fn compose_scene(state: &mut State) {
     render_state.cache.begin_frame();
     draw_background(&mut render_state.scene, &frame);
     if let Some(repository) = &state.repository {
+        draw_edges(&mut render_state.scene, repository, &frame, state.hovered);
         MapPainter {
             scene: &mut render_state.scene,
             cache: &mut render_state.cache,
@@ -64,9 +65,9 @@ fn compose_scene(state: &mut State) {
             repository,
             frame: &frame,
             hovered: state.hovered,
+            linked: &collect_linked_nodes(repository, state.hovered),
         }
         .draw();
-        draw_edges(&mut render_state.scene, repository, &frame, state.hovered);
     }
     draw_orb(&mut render_state.scene, &state.agent_session.orb, &frame);
     let mut overlay = OverlayPainter {
@@ -157,6 +158,7 @@ mod tests {
     use crate::resources::camera::Camera;
     use crate::resources::text::TextEngine;
     use crate::systems::render::cache::RenderCache;
+    use std::collections::HashSet;
     use std::num::NonZeroUsize;
     use std::path::Path;
     use vello::kurbo::{Point, Size};
@@ -211,6 +213,7 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
+            draw_edges(&mut scene, &repository, &frame, None);
             MapPainter {
                 scene: &mut scene,
                 cache: &mut cache,
@@ -218,9 +221,9 @@ mod tests {
                 repository: &repository,
                 frame: &frame,
                 hovered: Some(repository.root_id()),
+                linked: &HashSet::new(),
             }
             .draw();
-            draw_edges(&mut scene, &repository, &frame, None);
             let mut prompt = crate::resources::prompt::Prompt::new();
             prompt.insert("explain how the semantic");
             prompt.break_line();
@@ -320,6 +323,7 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
+            draw_edges(&mut scene, &repository, &frame, Some(camera_id));
             MapPainter {
                 scene: &mut scene,
                 cache: &mut cache,
@@ -327,9 +331,9 @@ mod tests {
                 repository: &repository,
                 frame: &frame,
                 hovered: Some(camera_id),
+                linked: &collect_linked_nodes(&repository, Some(camera_id)),
             }
             .draw();
-            draw_edges(&mut scene, &repository, &frame, Some(camera_id));
             let params = RenderParams {
                 base_color: BACKGROUND,
                 width: 1280,

@@ -27,7 +27,7 @@ pub fn draw_edges(
     let mut highlighted = BezPath::new();
     let mut endpoints = BezPath::new();
     let endpoint_radius = ENDPOINT_RADIUS_PX * frame.scale_factor / frame.zoom;
-    let focused_file = hovered.filter(|id| !repository.node(*id).get_is_expanded_directory());
+    let focused_file = focus_file(repository, hovered);
     for edge in collect_visible_edges(repository) {
         let Some((start, end)) = compute_endpoints(repository, &edge) else {
             continue;
@@ -35,9 +35,8 @@ pub fn draw_edges(
         if !check_overlaps(Rect::from_points(start, end), frame.visible) {
             continue;
         }
-        let is_highlighted = focused_file.is_some_and(|file| {
-            repository.check_is_within(edge.from, file) || repository.check_is_within(edge.to, file)
-        });
+        let is_highlighted =
+            focused_file.is_some_and(|file| check_touches(repository, &edge, file));
         let target = match is_highlighted {
             true => &mut highlighted,
             false => &mut ambient,
@@ -72,6 +71,33 @@ pub fn draw_edges(
         &highlighted,
     );
     scene.fill(Fill::NonZero, frame.transform, ACCENT, None, &endpoints);
+}
+
+pub fn collect_linked_nodes(repository: &Repository, hovered: Option<NodeId>) -> HashSet<NodeId> {
+    let Some(file) = focus_file(repository, hovered) else {
+        return HashSet::new();
+    };
+    collect_visible_edges(repository)
+        .into_iter()
+        .filter_map(|edge| {
+            match (
+                repository.check_is_within(edge.from, file),
+                repository.check_is_within(edge.to, file),
+            ) {
+                (true, false) => Some(edge.to),
+                (false, true) => Some(edge.from),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn focus_file(repository: &Repository, hovered: Option<NodeId>) -> Option<NodeId> {
+    hovered.filter(|id| !repository.node(*id).get_is_expanded_directory())
+}
+
+fn check_touches(repository: &Repository, edge: &Edge, file: NodeId) -> bool {
+    repository.check_is_within(edge.from, file) || repository.check_is_within(edge.to, file)
 }
 
 fn collect_visible_edges(repository: &Repository) -> Vec<Edge> {
