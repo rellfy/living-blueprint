@@ -1,4 +1,6 @@
-# A Living Blueprint
+# A Living Blueprint of Source Code
+
+![img.png](img.png)
 
 Since late 2025, the bottleneck in software engineering has been human understanding of the system. Before that, the
 bottleneck was humans writing the software (or something along those lines).
