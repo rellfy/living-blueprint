@@ -16,6 +16,14 @@ pub fn zoom_semantically(state: &mut State, is_expanding: bool) {
     apply_step(repository, target, is_expanding);
 }
 
+pub fn zoom_all_semantically(state: &mut State, is_expanding: bool) {
+    let Some(repository) = state.repository.as_mut() else {
+        return;
+    };
+    let root = repository.root_id();
+    apply_step(repository, root, is_expanding);
+}
+
 pub fn update_semantic_zoom(state: &mut State) {
     let Some(repository) = state.repository.as_mut() else {
         return;

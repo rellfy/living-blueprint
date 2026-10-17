@@ -2,7 +2,7 @@ use crate::State;
 use crate::resources::pointer::PointerRelease;
 use crate::resources::prompt::Motion;
 use crate::systems::agent::submit_prompt;
-use crate::systems::semantic_zoom::zoom_semantically;
+use crate::systems::semantic_zoom::{zoom_all_semantically, zoom_semantically};
 use vello::kurbo::{Point, Size};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -48,6 +48,12 @@ pub fn handle_key(state: &mut State, event: KeyEvent) {
         Key::Named(NamedKey::Enter) => handle_enter(state),
         Key::Named(NamedKey::Escape) => escape_prompt(state),
         Key::Named(NamedKey::Home) if state.prompt.get_is_empty() => fit_repository(state),
+        Key::Named(NamedKey::ArrowLeft) if state.prompt.get_is_empty() => {
+            zoom_all_semantically(state, false)
+        }
+        Key::Named(NamedKey::ArrowRight) if state.prompt.get_is_empty() => {
+            zoom_all_semantically(state, true)
+        }
         Key::Named(key) => handle_named_key(state, key, event.text.as_deref()),
         Key::Character(ref key) if is_command => handle_shortcut(state, key),
         _ => insert_text(state, event.text.as_deref()),
