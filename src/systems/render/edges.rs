@@ -26,6 +26,7 @@ pub fn draw_edges(
     let mut highlighted = BezPath::new();
     let mut endpoints = BezPath::new();
     let endpoint_radius = ENDPOINT_RADIUS_PX * frame.scale_factor / frame.zoom;
+    let focused_file = hovered.filter(|id| !repository.node(*id).get_is_directory());
     for edge in repository.edges() {
         let Some((start, end)) = compute_endpoints(repository, edge) else {
             continue;
@@ -33,9 +34,8 @@ pub fn draw_edges(
         if !check_overlaps(Rect::from_points(start, end), frame.visible) {
             continue;
         }
-        let is_highlighted = hovered.is_some_and(|hovered| {
-            repository.check_is_within(edge.from, hovered)
-                || repository.check_is_within(edge.to, hovered)
+        let is_highlighted = focused_file.is_some_and(|file| {
+            repository.check_is_within(edge.from, file) || repository.check_is_within(edge.to, file)
         });
         let target = match is_highlighted {
             true => &mut highlighted,
@@ -51,7 +51,7 @@ pub fn draw_edges(
         CODE_FADE_END_PX,
         LINE_HEIGHT * frame.zoom,
     ) as f32;
-    let ambient_alpha = match hovered.is_some() {
+    let ambient_alpha = match focused_file.is_some() {
         true => DIMMED_ALPHA,
         false => AMBIENT_ALPHA,
     } * (1.0 - code_visibility);
