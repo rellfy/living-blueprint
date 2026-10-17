@@ -1,5 +1,6 @@
 use crate::analysis::analyse;
-use crate::repository::{LineSpan, SourceFile};
+use crate::repository::SourceFile;
+use crate::repository::view::{TextView, build_outline_view, build_summary_view, measure_lines};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -60,14 +61,27 @@ fn load_file(root: &Path, path: &Path) -> Option<LoadedFile> {
     let text = decode_text(&bytes).filter(|text| !check_is_collapsed(path, text));
     let line_spans = text.as_deref().map(measure_lines).unwrap_or_default();
     let analysis = text.as_deref().and_then(|text| analyse(path, text));
+    let outline = analysis
+        .as_ref()
+        .map(|analysis| analysis.outline.as_slice())
+        .unwrap_or_default();
+    let outline_view = build_outline_view(path, outline);
+    let summary_view = build_summary_view(path, outline)
+        .filter(|summary| !check_is_same_text(summary, outline_view.as_ref()));
     Some(LoadedFile {
         path: path.to_path_buf(),
         source: SourceFile {
             text: text.map(Arc::from),
             line_spans,
             analysis,
+            outline: outline_view,
+            summary: summary_view,
         },
     })
+}
+
+fn check_is_same_text(view: &TextView, other: Option<&TextView>) -> bool {
+    other.is_some_and(|other| other.text == view.text)
 }
 
 fn decode_text(bytes: &[u8]) -> Option<String> {
@@ -85,19 +99,6 @@ fn check_is_collapsed(path: &Path, text: &str) -> bool {
 
 fn check_is_binary(bytes: &[u8]) -> bool {
     bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
-}
-
-fn measure_lines(text: &str) -> Vec<LineSpan> {
-    text.lines().map(measure_line).collect()
-}
-
-fn measure_line(line: &str) -> LineSpan {
-    let length = line.chars().count() as u32;
-    let trimmed_length = line.trim_start().chars().count() as u32;
-    LineSpan {
-        indent: length - trimmed_length,
-        length,
-    }
 }
 
 fn list_git_files(root: &Path) -> Option<Vec<PathBuf>> {

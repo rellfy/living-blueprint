@@ -18,11 +18,13 @@ pub fn update_repository(state: &mut State) {
     }
 }
 
-fn install_repository(state: &mut State, repository: Repository, changed_paths: Vec<PathBuf>) {
+fn install_repository(state: &mut State, mut repository: Repository, changed_paths: Vec<PathBuf>) {
     state.repository_sync.watch_directories(&repository);
     if let Some(previous) = &state.repository {
+        repository.inherit(previous);
         state.render_state.cache.migrate(previous, &repository);
     }
+    state.semantic_zoom.reset();
     if state.repository.is_none() {
         state
             .camera

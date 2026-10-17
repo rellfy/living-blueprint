@@ -2,15 +2,21 @@ use crate::analysis::FileAnalysis;
 use crate::repository::edges::resolve_edges;
 use crate::repository::layout::apply_layout;
 use crate::repository::loader::{LoadedFile, load_files};
+use crate::repository::view::{BodyView, TextView, build_listing_view};
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vello::kurbo::{Point, Rect};
 
+pub mod detail;
 pub mod edges;
 pub mod layout;
 pub mod loader;
+pub mod view;
+
+const RECT_ANIMATION_RATE: f64 = 14.0;
+const SETTLED_RECT_DISTANCE: f64 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub usize);
@@ -20,6 +26,7 @@ pub struct Repository {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     ids_by_path: HashMap<PathBuf, NodeId>,
+    char_advance: f64,
 }
 
 pub struct Node {
@@ -28,12 +35,14 @@ pub struct Node {
     pub parent: Option<NodeId>,
     pub children: Vec<NodeId>,
     pub kind: NodeKind,
+    pub detail: Detail,
     pub rect: Rect,
+    pub target_rect: Rect,
     pub header_height: f64,
 }
 
 pub enum NodeKind {
-    Directory,
+    Directory(TextView),
     File(SourceFile),
 }
 
@@ -41,6 +50,16 @@ pub struct SourceFile {
     pub text: Option<Arc<str>>,
     pub line_spans: Vec<LineSpan>,
     pub analysis: Option<FileAnalysis>,
+    pub outline: Option<TextView>,
+    pub summary: Option<TextView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Detail {
+    Collapsed,
+    Summary,
+    Outline,
+    Expanded,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,10 +78,46 @@ pub struct Edge {
 impl Repository {
     pub fn load(root: &Path, char_advance: f64) -> io::Result<Self> {
         let files = load_files(root)?;
-        let mut repository = Self::from_files(root, files);
+        let mut repository = Self::from_files(root, files, char_advance);
         repository.edges = resolve_edges(&repository.nodes);
-        apply_layout(&mut repository.nodes, char_advance);
+        repository.relayout();
+        repository.snap_rects();
         Ok(repository)
+    }
+
+    pub fn inherit(&mut self, previous: &Repository) {
+        let mut fresh_ids = Vec::new();
+        for (index, node) in self.nodes.iter_mut().enumerate() {
+            let Some(previous_id) = previous.find_by_path(&node.path) else {
+                fresh_ids.push(index);
+                continue;
+            };
+            let previous_node = previous.node(previous_id);
+            node.detail = node.nearest_available_detail(previous_node.detail);
+            node.rect = previous_node.rect;
+        }
+        self.relayout();
+        for index in fresh_ids {
+            self.nodes[index].rect = self.nodes[index].target_rect;
+        }
+    }
+
+    pub fn relayout(&mut self) {
+        apply_layout(&mut self.nodes, self.char_advance);
+    }
+
+    pub fn animate(&mut self, delta_time: f64) -> bool {
+        let blend = 1.0 - (-RECT_ANIMATION_RATE * delta_time).exp();
+        let mut is_animating = false;
+        for node in &mut self.nodes {
+            if check_is_settled(node.rect, node.target_rect) {
+                node.rect = node.target_rect;
+                continue;
+            }
+            is_animating = true;
+            node.rect = lerp_rect(node.rect, node.target_rect, blend);
+        }
+        is_animating
     }
 
     pub fn root(&self) -> &Path {
@@ -86,7 +141,7 @@ impl Repository {
     }
 
     pub fn bounds(&self) -> Rect {
-        self.node(self.root_id()).rect
+        self.node(self.root_id()).target_rect
     }
 
     pub fn find_by_path(&self, path: &Path) -> Option<NodeId> {
@@ -96,7 +151,7 @@ impl Repository {
     pub fn directory_paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
         self.nodes
             .iter()
-            .filter(|node| matches!(node.kind, NodeKind::Directory))
+            .filter(|node| node.get_is_directory())
             .map(|node| self.root.join(&node.path))
     }
 
@@ -122,26 +177,49 @@ impl Repository {
         false
     }
 
+    pub fn visible_ancestor(&self, id: NodeId) -> NodeId {
+        let mut visible = id;
+        let mut current = self.node(id).parent;
+        while let Some(ancestor) = current {
+            if self.node(ancestor).get_is_collapsed_directory() {
+                visible = ancestor;
+            }
+            current = self.node(ancestor).parent;
+        }
+        visible
+    }
+
+    fn snap_rects(&mut self) {
+        for node in &mut self.nodes {
+            node.rect = node.target_rect;
+        }
+    }
+
     fn find_child_at(&self, id: NodeId, point: Point) -> Option<NodeId> {
-        self.node(id)
-            .children
+        let node = self.node(id);
+        if node.get_is_collapsed_directory() {
+            return None;
+        }
+        node.children
             .iter()
             .copied()
             .find(|child| self.node(*child).rect.contains(point))
     }
 
-    fn from_files(root: &Path, files: Vec<LoadedFile>) -> Self {
+    fn from_files(root: &Path, files: Vec<LoadedFile>, char_advance: f64) -> Self {
         let mut repository = Self {
             root: root.to_path_buf(),
             nodes: vec![create_directory_node(root_name(root), PathBuf::new(), None)],
             edges: Vec::new(),
             ids_by_path: HashMap::new(),
+            char_advance,
         };
         repository.ids_by_path.insert(PathBuf::new(), NodeId(0));
         for file in files {
             repository.insert_file(file);
         }
         repository.sort_children();
+        repository.build_listings();
         repository
     }
 
@@ -155,7 +233,9 @@ impl Repository {
             parent: Some(parent),
             children: Vec::new(),
             kind: NodeKind::File(file.source),
+            detail: Detail::Expanded,
             rect: Rect::ZERO,
+            target_rect: Rect::ZERO,
             header_height: 0.0,
         });
         self.nodes[parent.0].children.push(id);
@@ -185,18 +265,96 @@ impl Repository {
             self.nodes[index].children = children;
         }
     }
+
+    fn build_listings(&mut self) {
+        for index in 0..self.nodes.len() {
+            if !self.nodes[index].get_is_directory() {
+                continue;
+            }
+            let children: Vec<&Node> = self.nodes[index]
+                .children
+                .iter()
+                .map(|child| &self.nodes[child.0])
+                .collect();
+            self.nodes[index].kind = NodeKind::Directory(build_listing_view(&children));
+        }
+    }
 }
 
 impl Node {
     pub fn source_file(&self) -> Option<&SourceFile> {
         match &self.kind {
             NodeKind::File(source_file) => Some(source_file),
-            NodeKind::Directory => None,
+            NodeKind::Directory(_) => None,
         }
     }
 
     pub fn get_is_directory(&self) -> bool {
-        matches!(self.kind, NodeKind::Directory)
+        matches!(self.kind, NodeKind::Directory(_))
+    }
+
+    pub fn get_is_collapsed_directory(&self) -> bool {
+        self.get_is_directory() && self.detail == Detail::Collapsed
+    }
+
+    pub fn get_is_expanded_directory(&self) -> bool {
+        self.get_is_directory() && self.detail == Detail::Expanded
+    }
+
+    pub fn body(&self) -> Option<BodyView<'_>> {
+        match (&self.kind, self.detail) {
+            (NodeKind::Directory(listing), Detail::Collapsed) => Some(listing.as_body()),
+            (NodeKind::Directory(_), _) => None,
+            (NodeKind::File(source_file), detail) => source_file.body(detail),
+        }
+    }
+
+    pub fn available_details(&self) -> Vec<Detail> {
+        let NodeKind::File(source_file) = &self.kind else {
+            return vec![Detail::Collapsed, Detail::Expanded];
+        };
+        [
+            (Detail::Collapsed, true),
+            (Detail::Summary, source_file.summary.is_some()),
+            (Detail::Outline, source_file.outline.is_some()),
+            (Detail::Expanded, true),
+        ]
+        .into_iter()
+        .filter(|(_, is_available)| *is_available)
+        .map(|(detail, _)| detail)
+        .collect()
+    }
+
+    fn nearest_available_detail(&self, detail: Detail) -> Detail {
+        self.available_details()
+            .into_iter()
+            .rev()
+            .find(|available| *available <= detail)
+            .unwrap_or(Detail::Collapsed)
+    }
+}
+
+impl SourceFile {
+    fn body(&self, detail: Detail) -> Option<BodyView<'_>> {
+        match detail {
+            Detail::Expanded => self.code_body(),
+            Detail::Outline => self.outline.as_ref().map(TextView::as_body),
+            Detail::Summary => self.summary.as_ref().map(TextView::as_body),
+            Detail::Collapsed => None,
+        }
+    }
+
+    fn code_body(&self) -> Option<BodyView<'_>> {
+        let highlights = self
+            .analysis
+            .as_ref()
+            .map(|analysis| analysis.highlights.as_slice())
+            .unwrap_or_default();
+        Some(BodyView {
+            text: self.text.as_deref()?,
+            line_spans: &self.line_spans,
+            highlights,
+        })
     }
 }
 
@@ -206,10 +364,24 @@ fn create_directory_node(name: String, path: PathBuf, parent: Option<NodeId>) ->
         path,
         parent,
         children: Vec::new(),
-        kind: NodeKind::Directory,
+        kind: NodeKind::Directory(TextView::new(String::new(), Vec::new())),
+        detail: Detail::Expanded,
         rect: Rect::ZERO,
+        target_rect: Rect::ZERO,
         header_height: 0.0,
     }
+}
+
+fn check_is_settled(rect: Rect, target: Rect) -> bool {
+    (rect.origin() - target.origin()).hypot() < SETTLED_RECT_DISTANCE
+        && (rect.size() - target.size()).to_vec2().hypot() < SETTLED_RECT_DISTANCE
+}
+
+fn lerp_rect(rect: Rect, target: Rect, blend: f64) -> Rect {
+    Rect::from_points(
+        rect.origin().lerp(target.origin(), blend),
+        Point::new(rect.x1, rect.y1).lerp(Point::new(target.x1, target.y1), blend),
+    )
 }
 
 fn sort_key(node: &Node) -> (bool, String) {

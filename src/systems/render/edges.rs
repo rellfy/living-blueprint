@@ -2,6 +2,7 @@ use crate::repository::layout::LINE_HEIGHT;
 use crate::repository::{Edge, NodeId, Repository};
 use crate::systems::render::palette::{ACCENT, INK};
 use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
+use std::collections::HashSet;
 use vello::Scene;
 use vello::kurbo::{BezPath, Circle, Point, Rect, Shape, Stroke};
 use vello::peniko::Fill;
@@ -26,9 +27,9 @@ pub fn draw_edges(
     let mut highlighted = BezPath::new();
     let mut endpoints = BezPath::new();
     let endpoint_radius = ENDPOINT_RADIUS_PX * frame.scale_factor / frame.zoom;
-    let focused_file = hovered.filter(|id| !repository.node(*id).get_is_directory());
-    for edge in repository.edges() {
-        let Some((start, end)) = compute_endpoints(repository, edge) else {
+    let focused_file = hovered.filter(|id| !repository.node(*id).get_is_expanded_directory());
+    for edge in collect_visible_edges(repository) {
+        let Some((start, end)) = compute_endpoints(repository, &edge) else {
             continue;
         };
         if !check_overlaps(Rect::from_points(start, end), frame.visible) {
@@ -71,6 +72,20 @@ pub fn draw_edges(
         &highlighted,
     );
     scene.fill(Fill::NonZero, frame.transform, ACCENT, None, &endpoints);
+}
+
+fn collect_visible_edges(repository: &Repository) -> Vec<Edge> {
+    let mut seen: HashSet<(NodeId, NodeId)> = HashSet::new();
+    repository
+        .edges()
+        .iter()
+        .map(|edge| Edge {
+            from: repository.visible_ancestor(edge.from),
+            to: repository.visible_ancestor(edge.to),
+            weight: edge.weight,
+        })
+        .filter(|edge| edge.from != edge.to && seen.insert((edge.from, edge.to)))
+        .collect()
 }
 
 fn compute_endpoints(repository: &Repository, edge: &Edge) -> Option<(Point, Point)> {

@@ -68,6 +68,14 @@ impl Camera {
         self.screen_velocity = Vec2::ZERO;
     }
 
+    pub fn shift_world(&mut self, world_delta: Vec2) {
+        self.center += world_delta;
+        self.target_center += world_delta;
+        if let Some(anchor) = self.zoom_anchor.as_mut() {
+            anchor.world_point += world_delta;
+        }
+    }
+
     pub fn release_with_velocity(&mut self, screen_velocity: Vec2) {
         self.screen_velocity = screen_velocity;
     }

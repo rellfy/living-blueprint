@@ -2,6 +2,7 @@ use crate::State;
 use crate::resources::pointer::PointerRelease;
 use crate::resources::prompt::Motion;
 use crate::systems::agent::submit_prompt;
+use crate::systems::semantic_zoom::{PIXELS_PER_STEP, zoom_semantically};
 use vello::kurbo::{Point, Size};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -13,6 +14,7 @@ pub fn handle_cursor_moved(state: &mut State, position: Point) {
     let Some(delta) = state.pointer.move_to(position) else {
         return;
     };
+    state.semantic_zoom.release_anchor();
     state.camera.pan_by_screen(delta);
 }
 
@@ -27,10 +29,17 @@ pub fn handle_mouse_button(state: &mut State, button: MouseButton, element_state
 }
 
 pub fn handle_mouse_wheel(state: &mut State, delta: MouseScrollDelta) {
-    let factor = match delta {
-        MouseScrollDelta::LineDelta(_, lines) => ZOOM_PER_LINE.powf(lines as f64),
-        MouseScrollDelta::PixelDelta(pixels) => ZOOM_PER_PIXEL.powf(pixels.y),
+    let (factor, steps) = match delta {
+        MouseScrollDelta::LineDelta(_, lines) => (ZOOM_PER_LINE.powf(lines as f64), lines as f64),
+        MouseScrollDelta::PixelDelta(pixels) => {
+            (ZOOM_PER_PIXEL.powf(pixels.y), pixels.y / PIXELS_PER_STEP)
+        }
     };
+    let is_camera_forced = state.modifiers.control_key();
+    if !is_camera_forced && zoom_semantically(state, steps) {
+        return;
+    }
+    state.semantic_zoom.release_anchor();
     let viewport = viewport_size(state);
     state
         .camera

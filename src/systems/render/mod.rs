@@ -170,46 +170,9 @@ mod tests {
     #[test]
     #[ignore = "requires a GPU"]
     fn renders_repository_offscreen_at_several_zoom_levels() {
-        let instance = Instance::new(InstanceDescriptor {
-            display: None,
-            backends: Backends::PRIMARY,
-            flags: InstanceFlags::default(),
-            memory_budget_thresholds: MemoryBudgetThresholds::default(),
-            backend_options: BackendOptions::default(),
-        });
-        let adapter =
-            pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
-                .unwrap();
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
-        let mut renderer = Renderer::new(
-            &device,
-            RendererOptions {
-                use_cpu: false,
-                antialiasing_support: AaSupport::area_only(),
-                num_init_threads: NonZeroUsize::new(1),
-                pipeline_cache: None,
-            },
-        )
-        .unwrap();
-        let viewport = Size::new(1280.0, 800.0);
-        let texture = device.create_texture(&TextureDescriptor {
-            label: None,
-            size: Extent3d {
-                width: 1280,
-                height: 800,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            format: TextureFormat::Rgba8Unorm,
-            view_formats: &[],
-        });
+        let (device, queue, mut renderer, texture) = create_gpu();
         let view = texture.create_view(&Default::default());
+        let viewport = Size::new(1280.0, 800.0);
         let mut text_engine = TextEngine::new();
         let repository = Repository::load(
             Path::new(env!("CARGO_MANIFEST_DIR")),
@@ -311,6 +274,119 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    #[ignore = "requires a GPU"]
+    fn renders_semantic_zoom_levels_offscreen() {
+        let (device, queue, mut renderer, texture) = create_gpu();
+        let view = texture.create_view(&Default::default());
+        let viewport = Size::new(1280.0, 800.0);
+        let mut text_engine = TextEngine::new();
+        let mut repository = Repository::load(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            text_engine.char_advance(),
+        )
+        .unwrap();
+        let root = repository.root_id();
+        let camera_id = repository
+            .find_by_path(Path::new("src/resources/camera.rs"))
+            .unwrap();
+        let mut cache = RenderCache::default();
+        let mut camera = Camera::new();
+        let root_steps = [1, 1, 1, 1, 1, 1];
+        for (index, compress_steps) in root_steps.into_iter().enumerate() {
+            for _ in 0..compress_steps {
+                repository.compress(root);
+            }
+            repository.animate(10.0);
+            let focus = match index {
+                0 | 1 => repository.node(camera_id).rect.inflate(400.0, 200.0),
+                _ => repository.bounds(),
+            };
+            camera.jump_to(focus, viewport);
+            let frame = FrameContext {
+                viewport,
+                transform: camera.transform(viewport),
+                zoom: camera.zoom(),
+                visible: camera.visible_world_rect(viewport),
+                scale_factor: 1.0,
+                elapsed_seconds: 0.0,
+                delta_time: 1.0,
+            };
+            let mut scene = Scene::new();
+            cache.begin_frame();
+            draw_background(&mut scene, &frame);
+            MapPainter {
+                scene: &mut scene,
+                cache: &mut cache,
+                text_engine: &mut text_engine,
+                repository: &repository,
+                frame: &frame,
+                hovered: Some(camera_id),
+            }
+            .draw();
+            draw_edges(&mut scene, &repository, &frame, Some(camera_id));
+            let params = RenderParams {
+                base_color: BACKGROUND,
+                width: 1280,
+                height: 800,
+                antialiasing_method: AaConfig::Area,
+            };
+            renderer
+                .render_to_texture(&device, &queue, &scene, &view, &params)
+                .unwrap();
+            if let Ok(directory) = std::env::var("LIVING_BLUEPRINT_SNAPSHOT_DIR") {
+                write_snapshot(
+                    &device,
+                    &queue,
+                    &texture,
+                    &format!("{directory}/semantic_{index}.ppm"),
+                );
+            }
+        }
+    }
+
+    fn create_gpu() -> (wgpu::Device, wgpu::Queue, Renderer, wgpu::Texture) {
+        let instance = Instance::new(InstanceDescriptor {
+            display: None,
+            backends: Backends::PRIMARY,
+            flags: InstanceFlags::default(),
+            memory_budget_thresholds: MemoryBudgetThresholds::default(),
+            backend_options: BackendOptions::default(),
+        });
+        let adapter =
+            pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
+                .unwrap();
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
+        let mut renderer = Renderer::new(
+            &device,
+            RendererOptions {
+                use_cpu: false,
+                antialiasing_support: AaSupport::area_only(),
+                num_init_threads: NonZeroUsize::new(1),
+                pipeline_cache: None,
+            },
+        )
+        .unwrap();
+        let texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: 1280,
+                height: 800,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC,
+            format: TextureFormat::Rgba8Unorm,
+            view_formats: &[],
+        });
+        (device, queue, renderer, texture)
     }
 
     fn write_snapshot(

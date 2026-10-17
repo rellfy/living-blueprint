@@ -1,6 +1,9 @@
 use crate::analysis::SymbolKind;
-use crate::repository::layout::{FILE_HEADER_HEIGHT, FILE_PADDING, LINE_HEIGHT};
-use crate::repository::{Node, NodeId, NodeKind, Repository};
+use crate::repository::layout::{
+    FILE_HEADER_HEIGHT, FILE_HEADER_LABEL_SIZE, FILE_PADDING, LABEL_CHARACTER_WIDTH_RATIO,
+    LINE_HEIGHT,
+};
+use crate::repository::{Detail, Node, NodeId, Repository};
 use crate::resources::text::{FontRole, TextEngine};
 use crate::systems::render::cache::{LABEL_FONT_SIZE, RenderCache};
 use crate::systems::render::palette::{ACCENT, INK, INK_DIM};
@@ -16,16 +19,16 @@ const CORNER_RADIUS_PX: f64 = 6.0;
 const DIRECTORY_FILL: Color = Color::from_rgba8(255, 255, 255, 7);
 const FILE_FILL: Color = Color::from_rgba8(17, 52, 102, 225);
 const FILE_FILL_HOVERED: Color = Color::from_rgba8(27, 68, 126, 235);
+const COLLAPSED_DIRECTORY_FILL: Color = Color::from_rgba8(30, 74, 132, 235);
+const COLLAPSED_DIRECTORY_FILL_HOVERED: Color = Color::from_rgba8(40, 90, 152, 240);
 const CODE_FADE_START_PX: f64 = 5.0;
 const CODE_FADE_END_PX: f64 = 9.0;
 const BARS_FADE_START_PX: f64 = 0.3;
 const BARS_FADE_END_PX: f64 = 0.9;
 const DIRECTORY_LABEL_RATIO: f64 = 0.5;
-const FILE_HEADER_LABEL_SIZE: f64 = 16.0;
 const MIN_LABEL_PX: f64 = 4.5;
 const MAX_DIRECTORY_LABEL_PX: f64 = 30.0;
 const MIN_DIRECTORY_LABEL_PX: f64 = 12.0;
-const LABEL_CHARACTER_WIDTH_RATIO: f64 = 0.6;
 const MAX_TILE_LABEL_PX: f64 = 24.0;
 const DEFINITION_LABEL_PX: f64 = 11.0;
 const MIN_DEFINITION_SPACING_PX: f64 = 14.0;
@@ -61,9 +64,10 @@ impl MapPainter<'_> {
         if node.rect.width().min(node.rect.height()) * self.frame.zoom < MIN_NODE_SCREEN_SIZE {
             return;
         }
-        match node.kind {
-            NodeKind::Directory => self.draw_directory(id, node),
-            NodeKind::File(_) => self.draw_file(id, node),
+        match (node.get_is_directory(), node.detail) {
+            (true, Detail::Expanded) => self.draw_directory(id, node),
+            (true, _) => self.draw_collapsed_directory(id, node),
+            (false, _) => self.draw_file(id, node),
         }
     }
 
@@ -80,23 +84,57 @@ impl MapPainter<'_> {
         self.draw_directory_label(node);
     }
 
+    fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
+        let (code_alpha, bars_alpha) = self.compute_body_alphas();
+        let (fill, stroke) = match self.hovered == Some(id) {
+            true => (COLLAPSED_DIRECTORY_FILL_HOVERED, ACCENT),
+            false => (COLLAPSED_DIRECTORY_FILL, INK.multiply_alpha(0.75)),
+        };
+        self.draw_box(node.rect, fill, stroke);
+        self.draw_separator(node.rect, node.header_height, 0.3 * code_alpha as f32);
+        self.draw_line_bars(id, node, bars_alpha);
+        self.draw_code(id, node, code_alpha);
+        self.draw_directory_label(node);
+    }
+
     fn draw_file(&mut self, id: NodeId, node: &Node) {
-        let line_px = LINE_HEIGHT * self.frame.zoom;
-        let code_alpha = smoothstep(CODE_FADE_START_PX, CODE_FADE_END_PX, line_px);
-        let bars_alpha =
-            smoothstep(BARS_FADE_START_PX, BARS_FADE_END_PX, line_px) * (1.0 - code_alpha);
+        let (code_alpha, bars_alpha) = self.compute_body_alphas();
         let is_hovered = self.hovered == Some(id);
         let (fill, stroke) = match is_hovered {
             true => (FILE_FILL_HOVERED, ACCENT),
             false => (FILE_FILL, INK.multiply_alpha(0.75)),
         };
         self.draw_box(node.rect, fill, stroke);
-        self.draw_separator(node.rect, FILE_HEADER_HEIGHT, 0.3 * code_alpha as f32);
+        let has_body = node.body().is_some();
+        let separator_alpha = match has_body {
+            true => 0.3 * code_alpha as f32,
+            false => 0.0,
+        };
+        self.draw_separator(node.rect, FILE_HEADER_HEIGHT, separator_alpha);
         self.draw_line_bars(id, node, bars_alpha);
         self.draw_code(id, node, code_alpha);
         self.draw_header_label(node, code_alpha);
         let tile_label_bottom = self.draw_tile_label(node, 1.0 - code_alpha);
-        self.draw_definitions(node, bars_alpha, tile_label_bottom);
+        if node.detail == Detail::Expanded {
+            self.draw_definitions(node, bars_alpha, tile_label_bottom);
+        }
+    }
+
+    fn compute_body_alphas(&self) -> (f64, f64) {
+        let line_px = LINE_HEIGHT * self.frame.zoom;
+        let code_alpha = smoothstep(CODE_FADE_START_PX, CODE_FADE_END_PX, line_px);
+        let bars_alpha =
+            smoothstep(BARS_FADE_START_PX, BARS_FADE_END_PX, line_px) * (1.0 - code_alpha);
+        (code_alpha, bars_alpha)
+    }
+
+    fn body_rect(&self, node: &Node) -> Rect {
+        Rect::new(
+            node.rect.x0 + FILE_PADDING * 0.5,
+            node.rect.y0 + node.header_height,
+            node.rect.x1 - FILE_PADDING * 0.5,
+            node.rect.y1,
+        )
     }
 
     fn draw_box(&mut self, rect: Rect, fill: Color, stroke: Color) {
@@ -129,31 +167,36 @@ impl MapPainter<'_> {
     }
 
     fn draw_line_bars(&mut self, id: NodeId, node: &Node, alpha: f64) {
-        if alpha <= 0.01 {
+        if alpha <= 0.01 || node.body().is_none() {
             return;
+        }
+        let content = self.body_rect(node);
+        let bars_transform = self.frame.transform * Affine::translate((node.rect.x0, content.y0));
+        let is_resizing = node.rect != node.target_rect;
+        if is_resizing {
+            self.scene
+                .push_clip_layer(Fill::NonZero, self.frame.transform, &content);
         }
         let bars = self
             .cache
             .line_bars(id, node, self.text_engine.char_advance());
         self.scene.fill(
             Fill::NonZero,
-            self.frame.transform,
+            bars_transform,
             INK_DIM.multiply_alpha(0.5 * alpha as f32),
             None,
             bars,
         );
+        if is_resizing {
+            self.scene.pop_layer();
+        }
     }
 
     fn draw_code(&mut self, id: NodeId, node: &Node, alpha: f64) {
         if alpha <= 0.01 {
             return;
         }
-        let content = Rect::new(
-            node.rect.x0 + FILE_PADDING * 0.5,
-            node.rect.y0 + FILE_HEADER_HEIGHT,
-            node.rect.x1 - FILE_PADDING * 0.5,
-            node.rect.y1,
-        );
+        let content = self.body_rect(node);
         let visible = content.intersect(self.frame.visible);
         if visible.is_zero_area() {
             return;
