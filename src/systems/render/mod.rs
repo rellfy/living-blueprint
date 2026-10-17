@@ -307,7 +307,7 @@ mod tests {
             }
             repository.animate(10.0);
             let focus = match index {
-                0 | 1 => repository.node(camera_id).rect.inflate(400.0, 200.0),
+                1 => repository.node(camera_id).rect.inflate(400.0, 200.0),
                 _ => repository.bounds(),
             };
             camera.jump_to(focus, viewport);

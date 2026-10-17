@@ -1,7 +1,7 @@
 use crate::analysis::SymbolKind;
 use crate::repository::layout::{
     FILE_HEADER_HEIGHT, FILE_HEADER_LABEL_SIZE, FILE_PADDING, LABEL_CHARACTER_WIDTH_RATIO,
-    LINE_HEIGHT,
+    LINE_HEIGHT, text_scale,
 };
 use crate::repository::{Detail, Node, NodeId, Repository};
 use crate::resources::text::{FontRole, TextEngine};
@@ -90,7 +90,7 @@ impl MapPainter<'_> {
     }
 
     fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
-        let (code_alpha, bars_alpha) = self.compute_body_alphas();
+        let (code_alpha, bars_alpha) = self.compute_body_alphas(node);
         let fill = match self.hovered == Some(id) {
             true => COLLAPSED_DIRECTORY_FILL_HOVERED,
             false => COLLAPSED_DIRECTORY_FILL,
@@ -104,7 +104,7 @@ impl MapPainter<'_> {
     }
 
     fn draw_file(&mut self, id: NodeId, node: &Node) {
-        let (code_alpha, bars_alpha) = self.compute_body_alphas();
+        let (code_alpha, bars_alpha) = self.compute_body_alphas(node);
         let fill = match self.hovered == Some(id) {
             true => FILE_FILL_HOVERED,
             false => FILE_FILL,
@@ -116,7 +116,7 @@ impl MapPainter<'_> {
             true => 0.3 * code_alpha as f32,
             false => 0.0,
         };
-        self.draw_separator(node.rect, FILE_HEADER_HEIGHT, separator_alpha);
+        self.draw_separator(node.rect, node.header_height, separator_alpha);
         self.draw_line_bars(id, node, bars_alpha);
         self.draw_code(id, node, code_alpha);
         self.draw_header_label(node, code_alpha);
@@ -159,8 +159,8 @@ impl MapPainter<'_> {
         (CORNER_RADIUS_PX / self.frame.zoom).min(rect.width().min(rect.height()) * 0.08)
     }
 
-    fn compute_body_alphas(&self) -> (f64, f64) {
-        let line_px = LINE_HEIGHT * self.frame.zoom;
+    fn compute_body_alphas(&self, node: &Node) -> (f64, f64) {
+        let line_px = LINE_HEIGHT * text_scale(node) * self.frame.zoom;
         let code_alpha = smoothstep(CODE_FADE_START_PX, CODE_FADE_END_PX, line_px);
         let bars_alpha =
             smoothstep(BARS_FADE_START_PX, BARS_FADE_END_PX, line_px) * (1.0 - code_alpha);
@@ -210,7 +210,10 @@ impl MapPainter<'_> {
             return;
         }
         let content = self.body_rect(node);
-        let bars_transform = self.frame.transform * Affine::translate((node.rect.x0, content.y0));
+        let scale = text_scale(node);
+        let bars_origin = (node.rect.x0 + FILE_PADDING * (1.0 - scale), content.y0);
+        let bars_transform =
+            self.frame.transform * Affine::translate(bars_origin) * Affine::scale(scale);
         let is_resizing = node.rect != node.target_rect;
         if is_resizing {
             self.scene
@@ -240,13 +243,16 @@ impl MapPainter<'_> {
         if visible.is_zero_area() {
             return;
         }
-        let first_line = ((visible.y0 - content.y0) / LINE_HEIGHT).floor().max(0.0) as usize;
-        let last_line = ((visible.y1 - content.y0) / LINE_HEIGHT).ceil() as usize + 1;
+        let scale = text_scale(node);
+        let line_height = LINE_HEIGHT * scale;
+        let first_line = ((visible.y0 - content.y0) / line_height).floor().max(0.0) as usize;
+        let last_line = ((visible.y1 - content.y0) / line_height).ceil() as usize + 1;
         let Some(layout) = self.cache.code_layout(id, node, self.text_engine) else {
             return;
         };
-        let text_transform =
-            self.frame.transform * Affine::translate((node.rect.x0 + FILE_PADDING, content.y0));
+        let text_transform = self.frame.transform
+            * Affine::translate((node.rect.x0 + FILE_PADDING, content.y0))
+            * Affine::scale(scale);
         self.scene
             .push_clip_layer(Fill::NonZero, self.frame.transform, &content);
         draw_layout_lines(
@@ -330,14 +336,15 @@ impl MapPainter<'_> {
     }
 
     fn draw_header_label(&mut self, node: &Node, alpha: f64) {
+        let world_size = FILE_HEADER_LABEL_SIZE * text_scale(node);
         self.draw_label(
             &node.name,
             LabelPlacement {
                 origin: Point::new(
                     node.rect.x0 + FILE_PADDING,
-                    node.rect.y0 + (FILE_HEADER_HEIGHT - FILE_HEADER_LABEL_SIZE * 1.2) * 0.5,
+                    node.rect.y0 + (node.header_height - world_size * 1.2) * 0.5,
                 ),
-                world_size: FILE_HEADER_LABEL_SIZE,
+                world_size,
                 alpha: alpha as f32,
                 color: INK,
                 weight: 600.0,

@@ -1,6 +1,6 @@
 use crate::analysis::FileAnalysis;
 use crate::repository::edges::resolve_edges;
-use crate::repository::layout::apply_layout;
+use crate::repository::layout::{apply_layout, plan_columns};
 use crate::repository::loader::{LoadedFile, load_files};
 use crate::repository::view::{BodyView, TextView, build_listing_view};
 use std::collections::HashMap;
@@ -15,6 +15,7 @@ pub mod layout;
 pub mod loader;
 pub mod view;
 
+const PLANNING_DETAIL: Detail = Detail::Outline;
 const RECT_ANIMATION_RATE: f64 = 14.0;
 const SETTLED_RECT_DISTANCE: f64 = 0.5;
 
@@ -36,6 +37,7 @@ pub struct Node {
     pub children: Vec<NodeId>,
     pub kind: NodeKind,
     pub detail: Detail,
+    pub column_count: usize,
     pub rect: Rect,
     pub target_rect: Rect,
     pub header_height: f64,
@@ -80,6 +82,7 @@ impl Repository {
         let files = load_files(root)?;
         let mut repository = Self::from_files(root, files, char_advance);
         repository.edges = resolve_edges(&repository.nodes);
+        repository.plan_layout();
         repository.set_all_details(Detail::Collapsed);
         repository.snap_rects();
         Ok(repository)
@@ -107,6 +110,16 @@ impl Repository {
             node.detail = detail;
         }
         self.relayout();
+    }
+
+    fn plan_layout(&mut self) {
+        for node in &mut self.nodes {
+            node.detail = match node.get_is_directory() {
+                true => Detail::Expanded,
+                false => node.nearest_available_detail(PLANNING_DETAIL),
+            };
+        }
+        plan_columns(&mut self.nodes, self.char_advance);
     }
 
     pub fn relayout(&mut self) {
@@ -241,6 +254,7 @@ impl Repository {
             children: Vec::new(),
             kind: NodeKind::File(file.source),
             detail: Detail::Expanded,
+            column_count: 1,
             rect: Rect::ZERO,
             target_rect: Rect::ZERO,
             header_height: 0.0,
@@ -373,6 +387,7 @@ fn create_directory_node(name: String, path: PathBuf, parent: Option<NodeId>) ->
         children: Vec::new(),
         kind: NodeKind::Directory(TextView::new(String::new(), Vec::new())),
         detail: Detail::Expanded,
+        column_count: 1,
         rect: Rect::ZERO,
         target_rect: Rect::ZERO,
         header_height: 0.0,

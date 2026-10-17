@@ -13,7 +13,10 @@ pub const MAX_FILE_COLUMNS: u32 = 100;
 const BINARY_FILE_LINES: f64 = 2.0;
 pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
 pub const GRID_UNIT: f64 = 25.0;
-const COLUMN_RATIO: f64 = 1.6;
+const TARGET_ASPECT: f64 = 16.0 / 9.0;
+const DIRECTORY_HEADER_RATIO: f64 = 0.03;
+const SUMMARY_TEXT_SCALE: f64 = 1.5;
+const COLLAPSED_TEXT_SCALE: f64 = 2.0;
 const MIN_COLLAPSED_COLUMNS: f64 = 12.0;
 
 struct Measurement {
@@ -26,6 +29,47 @@ pub fn apply_layout(nodes: &mut [Node], char_advance: f64) {
     let mut measurements: Vec<Option<Measurement>> = (0..nodes.len()).map(|_| None).collect();
     measure(nodes, NodeId(0), char_advance, &mut measurements);
     place(nodes, NodeId(0), Point::ZERO, &measurements);
+}
+
+pub fn text_scale(node: &Node) -> f64 {
+    match (node.get_is_directory(), node.detail) {
+        (true, Detail::Collapsed) => SUMMARY_TEXT_SCALE,
+        (true, _) => 1.0,
+        (false, Detail::Summary) => SUMMARY_TEXT_SCALE,
+        (false, Detail::Collapsed) => COLLAPSED_TEXT_SCALE,
+        (false, _) => 1.0,
+    }
+}
+
+pub fn plan_columns(nodes: &mut [Node], char_advance: f64) {
+    plan_node(nodes, NodeId(0), char_advance);
+}
+
+fn plan_node(nodes: &mut [Node], id: NodeId, char_advance: f64) -> Size {
+    if !nodes[id.0].get_is_directory() {
+        return snap_size(measure_file(&nodes[id.0], char_advance).size);
+    }
+    let children = nodes[id.0].children.clone();
+    let child_sizes: Vec<Size> = children
+        .iter()
+        .map(|child| plan_node(nodes, *child, char_advance))
+        .collect();
+    let column_count = choose_column_count(&child_sizes);
+    nodes[id.0].column_count = column_count;
+    snap_size(measure_directory(&child_sizes, column_count).size)
+}
+
+fn choose_column_count(child_sizes: &[Size]) -> usize {
+    (1..=child_sizes.len().max(1))
+        .min_by(|first, second| {
+            compute_fit_cost(child_sizes, *first).total_cmp(&compute_fit_cost(child_sizes, *second))
+        })
+        .unwrap_or(1)
+}
+
+fn compute_fit_cost(child_sizes: &[Size], column_count: usize) -> f64 {
+    let size = measure_directory(child_sizes, column_count).size;
+    size.width.max(size.height * TARGET_ASPECT)
 }
 
 fn measure(
@@ -42,7 +86,7 @@ fn measure(
                 .iter()
                 .map(|child| measure(nodes, *child, char_advance, measurements))
                 .collect();
-            measure_directory(&child_sizes)
+            measure_directory(&child_sizes, node.column_count)
         }
         (true, _) => measure_collapsed_directory(node, char_advance),
         (false, _) => measure_file(node, char_advance),
@@ -79,6 +123,7 @@ fn hide(nodes: &mut [Node], id: NodeId, rect: Rect) {
 }
 
 fn measure_file(node: &Node, char_advance: f64) -> Measurement {
+    let scale = text_scale(node);
     let body_size = match (node.body(), node.detail) {
         (Some(body), _) => measure_body(body, char_advance),
         (None, Detail::Collapsed) => Size::ZERO,
@@ -86,9 +131,11 @@ fn measure_file(node: &Node, char_advance: f64) -> Measurement {
             MIN_FILE_COLUMNS as f64 * char_advance,
             BINARY_FILE_LINES * LINE_HEIGHT + FILE_PADDING,
         ),
-    };
-    let label_width =
-        node.name.chars().count() as f64 * FILE_HEADER_LABEL_SIZE * LABEL_CHARACTER_WIDTH_RATIO;
+    } * scale;
+    let label_width = node.name.chars().count() as f64
+        * FILE_HEADER_LABEL_SIZE
+        * LABEL_CHARACTER_WIDTH_RATIO
+        * scale;
     let min_columns = match node.detail {
         Detail::Expanded => MIN_FILE_COLUMNS as f64,
         _ => MIN_COLLAPSED_COLUMNS,
@@ -96,22 +143,22 @@ fn measure_file(node: &Node, char_advance: f64) -> Measurement {
     let width = body_size
         .width
         .max(label_width)
-        .max(min_columns * char_advance);
+        .max(min_columns * char_advance * scale);
+    let header_height = snap(FILE_HEADER_HEIGHT * scale);
     Measurement {
-        size: Size::new(
-            width + FILE_PADDING * 2.0,
-            FILE_HEADER_HEIGHT + body_size.height,
-        ),
-        header_height: FILE_HEADER_HEIGHT,
+        size: Size::new(width + FILE_PADDING * 2.0, header_height + body_size.height),
+        header_height,
         child_offsets: Vec::new(),
     }
 }
 
 fn measure_collapsed_directory(node: &Node, char_advance: f64) -> Measurement {
-    let header_height = snap(MIN_DIRECTORY_HEADER_HEIGHT);
+    let scale = text_scale(node);
+    let header_height = snap(MIN_DIRECTORY_HEADER_HEIGHT * scale);
     let body_size = node
         .body()
-        .map_or(Size::ZERO, |body| measure_body(body, char_advance));
+        .map_or(Size::ZERO, |body| measure_body(body, char_advance))
+        * scale;
     let label_width =
         (node.name.chars().count() + 1) as f64 * header_height * 0.5 * LABEL_CHARACTER_WIDTH_RATIO
             + header_height * 0.45;
@@ -140,9 +187,10 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
     )
 }
 
-fn measure_directory(child_sizes: &[Size]) -> Measurement {
-    let (content_size, offsets) = pack_grid(child_sizes);
-    let header_height = snap(MIN_DIRECTORY_HEADER_HEIGHT);
+fn measure_directory(child_sizes: &[Size], column_count: usize) -> Measurement {
+    let (content_size, offsets) = pack_grid(child_sizes, column_count);
+    let header_height =
+        snap((content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT));
     let padding = GRID_UNIT;
     let content_origin = Vec2::new(padding, header_height);
     Measurement {
@@ -158,8 +206,8 @@ fn measure_directory(child_sizes: &[Size]) -> Measurement {
     }
 }
 
-fn pack_grid(sizes: &[Size]) -> (Size, Vec<Vec2>) {
-    let column_count = compute_column_count(sizes.len());
+fn pack_grid(sizes: &[Size], column_count: usize) -> (Size, Vec<Vec2>) {
+    let column_count = column_count.clamp(1, sizes.len().max(1));
     let mut placed: Vec<Rect> = Vec::with_capacity(sizes.len());
     for (index, size) in sizes.iter().enumerate() {
         let left = (index % column_count != 0).then(|| placed[index - 1]);
@@ -184,11 +232,6 @@ fn pack_grid(sizes: &[Size]) -> (Size, Vec<Vec2>) {
 
 fn check_overlaps_horizontally(rect: Rect, span: (f64, f64)) -> bool {
     rect.x0 < span.1 + GRID_UNIT && span.0 < rect.x1 + GRID_UNIT
-}
-
-pub fn compute_column_count(child_count: usize) -> usize {
-    let column_count = (child_count as f64 * COLUMN_RATIO).sqrt().ceil() as usize;
-    column_count.clamp(1, child_count.max(1))
 }
 
 fn snap_size(size: Size) -> Size {
