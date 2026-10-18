@@ -7,6 +7,7 @@ pub mod watcher;
 const TURN_END_REASONS: &[&str] = &["end_turn", "max_tokens"];
 const SYNTHETIC_MODEL: &str = "<synthetic>";
 const COMMAND_PREFIX: char = '<';
+const SHELL_SEPARATORS: &[char] = &['\'', '"', '|', ';', '&', '<', '>', '(', ')', '=', '`'];
 
 pub fn parse_transcript_line(line: &str, repository_root: &Path) -> Vec<AgentEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -81,10 +82,22 @@ fn parse_block(
                 false => AgentEvent::Text(text),
             })
         }
-        "tool_use" => Some(AgentEvent::ToolUse {
-            tool: block["name"].as_str()?.to_string(),
-            paths: collect_paths(&block["input"], working_directory, repository_root),
-        }),
+        "tool_use" => {
+            let input = &block["input"];
+            let command = input["command"].as_str().unwrap_or_default();
+            let paths = collect_paths(input, working_directory, repository_root)
+                .into_iter()
+                .chain(collect_command_paths(
+                    command,
+                    working_directory,
+                    repository_root,
+                ))
+                .collect();
+            Some(AgentEvent::ToolUse {
+                tool: block["name"].as_str()?.to_string(),
+                paths,
+            })
+        }
         _ => None,
     }
 }
@@ -94,6 +107,20 @@ fn collect_paths(input: &Value, working_directory: &Path, repository_root: &Path
         .iter()
         .filter_map(|key| input[*key].as_str())
         .map(|path| make_relative(&working_directory.join(path), repository_root))
+        .collect()
+}
+
+fn collect_command_paths(
+    command: &str,
+    working_directory: &Path,
+    repository_root: &Path,
+) -> Vec<PathBuf> {
+    command
+        .split(|character: char| character.is_whitespace() || SHELL_SEPARATORS.contains(&character))
+        .map(|token| token.split(':').next().unwrap_or_default())
+        .filter(|token| !token.is_empty() && !token.starts_with('-'))
+        .map(|token| make_relative(&working_directory.join(token), repository_root))
+        .filter(|path| !path.as_os_str().is_empty())
         .collect()
 }
 
@@ -138,6 +165,17 @@ mod tests {
         };
         assert_eq!(tool, "Edit");
         assert_eq!(paths, &vec![PathBuf::from("src/main.rs")]);
+    }
+
+    #[test]
+    fn extracts_candidate_paths_from_shell_commands() {
+        let line = r#"{"type":"assistant","cwd":"/repo","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash","input":{"command":"cd /repo && grep -n foo src/a.rs:12 | head -5"}}]}}"#;
+        let events = parse_transcript_line(line, &repository_root());
+        let [AgentEvent::ToolUse { paths, .. }] = &events[..] else {
+            panic!("unexpected events: {events:?}");
+        };
+        assert!(paths.contains(&PathBuf::from("src/a.rs")));
+        assert!(!paths.contains(&PathBuf::new()));
     }
 
     #[test]

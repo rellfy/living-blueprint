@@ -1,9 +1,10 @@
 use crate::State;
 use crate::agent::AgentEvent;
 use crate::agent::process::AgentProcess;
+use crate::repository::Repository;
 use crate::resources::agent_feed::{AgentFeed, FeedKind};
 use crate::resources::agent_sessions::{AgentSessions, AgentStatus};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod state;
 
@@ -51,6 +52,7 @@ fn poll_process(state: &mut State) {
         apply_event(
             &mut state.agent_sessions,
             &mut state.agent_feed,
+            state.repository.as_ref(),
             &session_id,
             event,
         );
@@ -74,6 +76,7 @@ fn poll_transcripts(state: &mut State) {
         apply_event(
             &mut state.agent_sessions,
             &mut state.agent_feed,
+            state.repository.as_ref(),
             &session_id,
             event,
         );
@@ -83,6 +86,7 @@ fn poll_transcripts(state: &mut State) {
 fn apply_event(
     sessions: &mut AgentSessions,
     feed: &mut AgentFeed,
+    repository: Option<&Repository>,
     session_id: &str,
     event: AgentEvent,
 ) {
@@ -101,12 +105,13 @@ fn apply_event(
         AgentEvent::Text(text) => feed.push(FeedKind::Message, &text),
         AgentEvent::ToolUse { tool, paths } => {
             session.status = AgentStatus::Working;
+            let focus = find_focus_path(paths, repository);
             feed.push(
                 FeedKind::ToolUse,
-                &describe_tool_use(&tool, paths.first().map(|path| path.as_path())),
+                &describe_tool_use(&tool, focus.as_deref()),
             );
-            if let Some(path) = paths.into_iter().next() {
-                session.focus_path = Some(path);
+            if focus.is_some() {
+                session.focus_path = focus;
             }
         }
         AgentEvent::Finished {
@@ -148,6 +153,15 @@ fn push_finish_entry(feed: &mut AgentFeed, is_success: bool, summary: Option<Str
         (_, false) => summary,
     };
     feed.push(kind, &text);
+}
+
+fn find_focus_path(paths: Vec<PathBuf>, repository: Option<&Repository>) -> Option<PathBuf> {
+    let Some(repository) = repository else {
+        return paths.into_iter().next();
+    };
+    paths
+        .into_iter()
+        .find(|path| repository.find_by_path(path).is_some())
 }
 
 fn describe_tool_use(tool: &str, path: Option<&Path>) -> String {

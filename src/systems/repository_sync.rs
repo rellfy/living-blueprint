@@ -30,22 +30,21 @@ fn install_repository(state: &mut State, mut repository: Repository, changed_pat
             .camera
             .jump_to_at_most(repository.bounds(), viewport_size(state), readable_zoom);
     }
-    focus_local_session(state, &repository, changed_paths);
+    focus_working_session(state, &repository, changed_paths);
     state.repository = Some(repository);
     state.load_error = None;
     state.hovered = None;
 }
 
-fn focus_local_session(state: &mut State, repository: &Repository, changed_paths: Vec<PathBuf>) {
-    let Some(process) = &state.agent_state.process else {
+fn focus_working_session(state: &mut State, repository: &Repository, changed_paths: Vec<PathBuf>) {
+    let mut working_sessions = state
+        .agent_sessions
+        .sessions
+        .values_mut()
+        .filter(|session| session.get_is_working());
+    let (Some(session), None) = (working_sessions.next(), working_sessions.next()) else {
         return;
     };
-    let Some(session) = state.agent_sessions.sessions.get_mut(process.session_id()) else {
-        return;
-    };
-    if !session.get_is_working() {
-        return;
-    }
     let changed_file = changed_paths
         .into_iter()
         .rev()
