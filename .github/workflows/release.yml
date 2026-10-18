@@ -63,3 +63,28 @@ jobs:
             "${{ steps.package.outputs.archive }}" \
             "${{ steps.package.outputs.archive }}.sha256" \
             --clobber
+
+  publish:
+    name: Publish to crates.io
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check tag matches Cargo.toml version
+        run: |
+          crate_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          tag_version="${RELEASE_TAG#v}"
+          if [ "$crate_version" != "$tag_version" ]; then
+            echo "Tag $RELEASE_TAG does not match Cargo.toml version $crate_version"
+            exit 1
+          fi
+      - run: cargo test --locked
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}

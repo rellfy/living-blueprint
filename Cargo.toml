@@ -1,10 +1,15 @@
 [package]
 name = "living-blueprint"
-version = "0.0.4"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
+description = "A semantically zoomable, living blueprint of a git repository"
 license = "MIT"
-publish = false
+repository = "https://github.com/rellfy/living-blueprint"
+readme = "README.md"
+keywords = ["code", "visualization", "git", "tree-sitter", "agent"]
+categories = ["development-tools", "visualization"]
+exclude = [".github", ".living-blueprint", "CLAUDE.md", "AGENTS.md", "img.png"]
 
 [dependencies]
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
