@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "positions": {
+    ".github": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    ".gitignore": {
+      "x": 0.0,
+      "y": 300.0
+    },
+    "AGENTS.md": {
+      "x": 0.0,
+      "y": 800.0
+    },
+    "CLAUDE.md": {
+      "x": 0.0,
+      "y": 425.0
+    },
+    "CONTRIBUTING.md": {
+      "x": 0.0,
+      "y": 1050.0
+    },
+    "Cargo.lock": {
+      "x": 0.0,
+      "y": 175.0
+    },
+    "Cargo.toml": {
+      "x": 0.0,
+      "y": 925.0
+    },
+    "LICENSE": {
+      "x": 0.0,
+      "y": 1175.0
+    },
+    "README.md": {
+      "x": 0.0,
+      "y": 675.0
+    },
+    "img.png": {
+      "x": 0.0,
+      "y": 550.0
+    },
+    "src": {
+      "x": 375.0,
+      "y": 0.0
+    },
+    "src/agent": {
+      "x": 325.0,
+      "y": 0.0
+    },
+    "src/agent/mod.rs": {
+      "x": 600.0,
+      "y": 50.0
+    },
+    "src/agent/process.rs": {
+      "x": 0.0,
+      "y": 200.0
+    },
+    "src/agent/transcript": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    "src/analysis": {
+      "x": 575.0,
+      "y": 0.0
+    },
+    "src/app.rs": {
+      "x": 0.0,
+      "y": 250.0
+    },
+    "src/arrangement": {
+      "x": 525.0,
+      "y": 525.0
+    },
+    "src/arrangement/mod.rs": {
+      "x": 0.0,
+      "y": 25.0
+    },
+    "src/arrangement/resolve.rs": {
+      "x": 275.0,
+      "y": 0.0
+    },
+    "src/arrangement/storage.rs": {
+      "x": 0.0,
+      "y": 150.0
+    },
+    "src/blueprint_directory.rs": {
+      "x": 0.0,
+      "y": 375.0
+    },
+    "src/main.rs": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    "src/repository": {
+      "x": 1200.0,
+      "y": 0.0
+    },
+    "src/repository/arrange.rs": {
+      "x": 0.0,
+      "y": 25.0
+    },
+    "src/repository/detail.rs": {
+      "x": 275.0,
+      "y": 0.0
+    },
+    "src/repository/edges.rs": {
+      "x": 550.0,
+      "y": 0.0
+    },
+    "src/repository/layout.rs": {
+      "x": 0.0,
+      "y": 150.0
+    },
+    "src/repository/loader.rs": {
+      "x": 275.0,
+      "y": 125.0
+    },
+    "src/repository/mod.rs": {
+      "x": 550.0,
+      "y": 125.0
+    },
+    "src/repository/view.rs": {
+      "x": 0.0,
+      "y": 275.0
+    },
+    "src/resources": {
+      "x": 1150.0,
+      "y": 475.0
+    },
+    "src/state.rs": {
+      "x": 0.0,
+      "y": 125.0
+    },
+    "src/systems": {
+      "x": 900.0,
+      "y": 0.0
+    },
+    "src/systems/agent": {
+      "x": 0.0,
+      "y": 275.0
+    },
+    "src/systems/drag": {
+      "x": 250.0,
+      "y": 0.0
+    },
+    "src/systems/input.rs": {
+      "x": 350.0,
+      "y": 475.0
+    },
+    "src/systems/mod.rs": {
+      "x": 625.0,
+      "y": 475.0
+    },
+    "src/systems/prompt.rs": {
+      "x": 0.0,
+      "y": 675.0
+    },
+    "src/systems/render": {
+      "x": 475.0,
+      "y": 0.0
+    },
+    "src/systems/repository_sync.rs": {
+      "x": 350.0,
+      "y": 600.0
+    },
+    "src/systems/semantic_zoom.rs": {
+      "x": 775.0,
+      "y": 600.0
+    },
+    "src/systems/view_state": {
+      "x": 0.0,
+      "y": 475.0
+    },
+    "src/view_state": {
+      "x": 0.0,
+      "y": 525.0
+    }
+  }
+}
