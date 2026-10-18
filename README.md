@@ -22,23 +22,31 @@ The key element of the map is the semantic zoom.
 
 ## The Semantic Zoom
 
-Fully zoomed out, the map renders its highest-level components.
+Fully zoomed out, the map renders its highest-level components.[^components]
 
 You can zoom in to see lower level details, up to the individual lines of code.
 
 ## The Living Blueprint
 
-The blueprint accepts natural language inputs. Those are forwarded to the user's favourite coding agent. Changes to the
-source code are reflected in the blueprint in real time. The source code remains the source of truth, rendered by the
-blueprint.
+The blueprint accepts natural language inputs. Those are forwarded to the user's favourite coding agent.[^agents] Changes
+to the source code are reflected in the blueprint in real time. The source code remains the source of truth, rendered by
+the blueprint.
 
 The user may iterate their blueprint/code at their preferred high-low level detail.
 
 ## The Program
 
-The living blueprint is available as a GUI natively for Linux, Mac and Windows.
+The living blueprint is available as a GUI natively for Linux, Mac and Windows.[^windows]
 
 ## Coding Agents
 
 Coding agents are shown in the map as floating orbs. They float around the areas that they are working with.
 
+[^components]: Aspirational, not yet implemented. Currently the highest level is the directory tree; higher-level
+    components (e.g. crates, packages or derived groupings) are planned.
+
+[^agents]: Aspirational, not yet implemented. Currently only [Claude Code](https://github.com/anthropics/claude-code)
+    is supported.
+
+[^windows]: Aspirational, not yet implemented. Windows is not yet built or tested; releases currently cover Linux and
+    macOS.
