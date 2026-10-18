@@ -18,6 +18,7 @@ pub mod map;
 pub mod orb;
 pub mod overlay;
 pub mod palette;
+pub mod routes;
 pub mod state;
 pub mod text;
 
@@ -57,7 +58,13 @@ fn compose_scene(state: &mut State) {
     render_state.cache.begin_frame();
     draw_background(&mut render_state.scene, &frame);
     if let Some(repository) = &state.repository {
-        draw_edges(&mut render_state.scene, repository, &frame, state.hovered);
+        draw_edges(
+            &mut render_state.scene,
+            repository,
+            &frame,
+            state.hovered,
+            &mut render_state.edge_routes,
+        );
         MapPainter {
             scene: &mut render_state.scene,
             cache: &mut render_state.cache,
@@ -158,6 +165,7 @@ mod tests {
     use crate::resources::camera::Camera;
     use crate::resources::text::TextEngine;
     use crate::systems::render::cache::RenderCache;
+    use crate::systems::render::routes::EdgeRoutes;
     use std::collections::HashSet;
     use std::num::NonZeroUsize;
     use std::path::Path;
@@ -187,6 +195,7 @@ mod tests {
             .node(repository.find_by_path(Path::new("src/main.rs")).unwrap())
             .rect;
         let mut cache = RenderCache::default();
+        let mut routes = EdgeRoutes::default();
         let mut camera = Camera::new();
         for (index, (rect, zoom_factor)) in [
             (repository.bounds(), 1.0),
@@ -213,7 +222,7 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
-            draw_edges(&mut scene, &repository, &frame, None);
+            draw_edges(&mut scene, &repository, &frame, None, &mut routes);
             MapPainter {
                 scene: &mut scene,
                 cache: &mut cache,
@@ -299,6 +308,7 @@ mod tests {
             .find_by_path(Path::new("src/resources/camera.rs"))
             .unwrap();
         let mut cache = RenderCache::default();
+        let mut routes = EdgeRoutes::default();
         let mut camera = Camera::new();
         let root_steps = [1, 1, 1, 1, 1, 1];
         for (index, compress_steps) in root_steps.into_iter().enumerate() {
@@ -323,7 +333,13 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
-            draw_edges(&mut scene, &repository, &frame, Some(camera_id));
+            draw_edges(
+                &mut scene,
+                &repository,
+                &frame,
+                Some(camera_id),
+                &mut routes,
+            );
             MapPainter {
                 scene: &mut scene,
                 cache: &mut cache,

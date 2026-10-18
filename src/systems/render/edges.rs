@@ -1,10 +1,11 @@
 use crate::repository::layout::LINE_HEIGHT;
 use crate::repository::{Edge, NodeId, Repository};
 use crate::systems::render::palette::{ACCENT, INK};
+use crate::systems::render::routes::EdgeRoutes;
 use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
 use std::collections::HashSet;
 use vello::Scene;
-use vello::kurbo::{BezPath, Circle, Point, Rect, Shape, Stroke};
+use vello::kurbo::{BezPath, Cap, Circle, Join, Point, Rect, Shape, Stroke};
 use vello::peniko::Fill;
 
 const EDGE_STROKE_PX: f64 = 1.0;
@@ -13,7 +14,6 @@ const AMBIENT_ALPHA: f32 = 0.10;
 const DIMMED_ALPHA: f32 = 0.035;
 const HIGHLIGHT_ALPHA: f32 = 0.9;
 const ENDPOINT_RADIUS_PX: f64 = 3.0;
-const CONTROL_RATIO: f64 = 0.45;
 const CODE_FADE_START_PX: f64 = 4.0;
 const CODE_FADE_END_PX: f64 = 8.0;
 
@@ -22,6 +22,7 @@ pub fn draw_edges(
     repository: &Repository,
     frame: &FrameContext,
     hovered: Option<NodeId>,
+    routes: &mut EdgeRoutes,
 ) {
     let mut ambient = BezPath::new();
     let mut highlighted = BezPath::new();
@@ -29,10 +30,10 @@ pub fn draw_edges(
     let endpoint_radius = ENDPOINT_RADIUS_PX * frame.scale_factor / frame.zoom;
     let focused_file = focus_file(repository, hovered);
     for edge in collect_visible_edges(repository) {
-        let Some((start, end)) = compute_endpoints(repository, &edge) else {
+        let Some(route) = routes.route(repository, edge.from, edge.to) else {
             continue;
         };
-        if !check_overlaps(Rect::from_points(start, end), frame.visible) {
+        if !check_overlaps(compute_bounds(route), frame.visible) {
             continue;
         }
         let is_highlighted =
@@ -41,7 +42,8 @@ pub fn draw_edges(
             true => &mut highlighted,
             false => &mut ambient,
         };
-        append_curve(target, start, end);
+        append_route(target, route);
+        let end = route.last().copied().unwrap_or_default();
         if is_highlighted {
             endpoints.extend(Circle::new(end, endpoint_radius).path_elements(0.1));
         }
@@ -57,14 +59,14 @@ pub fn draw_edges(
     } * (1.0 - code_visibility);
     let stroke_scale = frame.scale_factor / frame.zoom;
     scene.stroke(
-        &Stroke::new(EDGE_STROKE_PX * stroke_scale),
+        &create_sharp_stroke(EDGE_STROKE_PX * stroke_scale),
         frame.transform,
         INK.multiply_alpha(ambient_alpha),
         None,
         &ambient,
     );
     scene.stroke(
-        &Stroke::new(HIGHLIGHT_STROKE_PX * stroke_scale),
+        &create_sharp_stroke(HIGHLIGHT_STROKE_PX * stroke_scale),
         frame.transform,
         ACCENT.multiply_alpha(HIGHLIGHT_ALPHA),
         None,
@@ -114,38 +116,24 @@ fn collect_visible_edges(repository: &Repository) -> Vec<Edge> {
         .collect()
 }
 
-fn compute_endpoints(repository: &Repository, edge: &Edge) -> Option<(Point, Point)> {
-    let from = repository.node(edge.from).rect;
-    let to = repository.node(edge.to).rect;
-    if from.is_zero_area() || to.is_zero_area() {
-        return None;
-    }
-    let is_target_right = to.center().x >= from.center().x;
-    let start_x = match is_target_right {
-        true => from.x1,
-        false => from.x0,
-    };
-    let end_x = match is_target_right {
-        true => to.x0,
-        false => to.x1,
-    };
-    Some((
-        Point::new(start_x, from.y0 + from.height().min(400.0) * 0.5),
-        Point::new(end_x, to.y0 + to.height().min(400.0) * 0.5),
-    ))
+fn compute_bounds(route: &[Point]) -> Rect {
+    route
+        .iter()
+        .fold(Rect::from_points(route[0], route[0]), |bounds, point| {
+            bounds.union_pt(*point)
+        })
 }
 
-fn append_curve(path: &mut BezPath, start: Point, end: Point) {
-    let delta = end - start;
-    let direction = match delta.x >= 0.0 {
-        true => 1.0,
-        false => -1.0,
+fn append_route(path: &mut BezPath, route: &[Point]) {
+    let Some((first, rest)) = route.split_first() else {
+        return;
     };
-    let control_offset = direction * (delta.x.abs() * CONTROL_RATIO).max(delta.y.abs() * 0.25);
-    path.move_to(start);
-    path.curve_to(
-        Point::new(start.x + control_offset, start.y),
-        Point::new(end.x - control_offset, end.y),
-        end,
-    );
+    path.move_to(*first);
+    rest.iter().for_each(|point| path.line_to(*point));
+}
+
+fn create_sharp_stroke(width: f64) -> Stroke {
+    Stroke::new(width)
+        .with_join(Join::Miter)
+        .with_caps(Cap::Butt)
 }

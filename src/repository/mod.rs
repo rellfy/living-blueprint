@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use vello::kurbo::{Point, Rect};
 
 pub mod detail;
@@ -14,6 +15,8 @@ pub mod edges;
 pub mod layout;
 pub mod loader;
 pub mod view;
+
+static NEXT_LAYOUT_VERSION: AtomicU64 = AtomicU64::new(1);
 
 const PLANNING_DETAIL: Detail = Detail::Outline;
 const RECT_ANIMATION_RATE: f64 = 14.0;
@@ -28,6 +31,7 @@ pub struct Repository {
     edges: Vec<Edge>,
     ids_by_path: HashMap<PathBuf, NodeId>,
     char_advance: f64,
+    layout_version: u64,
 }
 
 pub struct Node {
@@ -124,6 +128,11 @@ impl Repository {
 
     pub fn relayout(&mut self) {
         apply_layout(&mut self.nodes, self.char_advance);
+        self.layout_version = NEXT_LAYOUT_VERSION.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn layout_version(&self) -> u64 {
+        self.layout_version
     }
 
     pub fn animate(&mut self, delta_time: f64) -> bool {
@@ -233,6 +242,7 @@ impl Repository {
             edges: Vec::new(),
             ids_by_path: HashMap::new(),
             char_advance,
+            layout_version: 0,
         };
         repository.ids_by_path.insert(PathBuf::new(), NodeId(0));
         for file in files {

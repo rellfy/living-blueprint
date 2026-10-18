@@ -13,6 +13,7 @@ pub const MAX_FILE_COLUMNS: u32 = 100;
 const BINARY_FILE_LINES: f64 = 2.0;
 pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
 pub const GRID_UNIT: f64 = 25.0;
+const CHILD_GAP: f64 = 2.0 * GRID_UNIT;
 const TARGET_ASPECT: f64 = 16.0 / 9.0;
 const DIRECTORY_HEADER_RATIO: f64 = 0.03;
 const SUMMARY_TEXT_SCALE: f64 = 1.5;
@@ -191,7 +192,7 @@ fn measure_directory(child_sizes: &[Size], column_count: usize) -> Measurement {
     let (content_size, offsets) = pack_grid(child_sizes, column_count);
     let header_height =
         snap((content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT));
-    let padding = GRID_UNIT;
+    let padding = CHILD_GAP;
     let content_origin = Vec2::new(padding, header_height);
     Measurement {
         size: Size::new(
@@ -213,13 +214,13 @@ fn pack_grid(sizes: &[Size], column_count: usize) -> (Size, Vec<Vec2>) {
         let left = (index % column_count != 0).then(|| placed[index - 1]);
         let above = index.checked_sub(column_count).map(|above| placed[above]);
         let row_start = index - index % column_count;
-        let x = left.map_or(0.0, |left| left.x1 + GRID_UNIT);
+        let x = left.map_or(0.0, |left| left.x1 + CHILD_GAP);
         let span = (x, x + size.width);
         let y = placed[..row_start]
             .iter()
             .filter(|rect| check_overlaps_horizontally(**rect, span))
             .chain(above.iter())
-            .map(|rect| rect.y1 + GRID_UNIT)
+            .map(|rect| rect.y1 + CHILD_GAP)
             .fold(0.0, f64::max);
         placed.push(Rect::from_origin_size(Point::new(x, y), *size));
     }
@@ -231,7 +232,7 @@ fn pack_grid(sizes: &[Size], column_count: usize) -> (Size, Vec<Vec2>) {
 }
 
 fn check_overlaps_horizontally(rect: Rect, span: (f64, f64)) -> bool {
-    rect.x0 < span.1 + GRID_UNIT && span.0 < rect.x1 + GRID_UNIT
+    rect.x0 < span.1 + CHILD_GAP && span.0 < rect.x1 + CHILD_GAP
 }
 
 fn snap_size(size: Size) -> Size {
