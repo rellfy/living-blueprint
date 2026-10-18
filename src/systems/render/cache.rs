@@ -1,7 +1,9 @@
-use crate::repository::layout::{FILE_PADDING, LINE_HEIGHT, MAX_FILE_COLUMNS};
+use crate::repository::layout::{
+    FILE_PADDING, LINE_HEIGHT, MAX_FILE_COLUMNS, line_number_gutter_width, text_scale,
+};
 use crate::repository::{Detail, Node, NodeId, Repository};
 use crate::resources::text::{ColorBrush, FontRole, TextEngine};
-use crate::systems::render::palette::{INK, highlight_color};
+use crate::systems::render::palette::{INK, LINE_NUMBER, highlight_color};
 use parley::Layout;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -14,6 +16,7 @@ const LINE_BAR_HEIGHT_RATIO: f64 = 0.55;
 pub struct RenderCache {
     code_layouts: HashMap<BodyKey, Layout<ColorBrush>>,
     line_bars: HashMap<BodyKey, BezPath>,
+    line_numbers: HashMap<BodyKey, Layout<ColorBrush>>,
     labels: HashMap<LabelKey, Layout<ColorBrush>>,
     code_layout_deadline: Option<Instant>,
 }
@@ -37,11 +40,13 @@ impl RenderCache {
     pub fn clear(&mut self) {
         self.code_layouts.clear();
         self.line_bars.clear();
+        self.line_numbers.clear();
     }
 
     pub fn migrate(&mut self, previous: &Repository, next: &Repository) {
         self.code_layouts = migrate_entries(std::mem::take(&mut self.code_layouts), previous, next);
         self.line_bars = migrate_entries(std::mem::take(&mut self.line_bars), previous, next);
+        self.line_numbers = migrate_entries(std::mem::take(&mut self.line_numbers), previous, next);
     }
 
     pub fn begin_frame(&mut self) {
@@ -69,6 +74,25 @@ impl RenderCache {
             self.code_layouts.insert(key, layout);
         }
         self.code_layouts.get(&key)
+    }
+
+    pub fn line_numbers(
+        &mut self,
+        id: NodeId,
+        node: &Node,
+        text_engine: &mut TextEngine,
+    ) -> Option<&Layout<ColorBrush>> {
+        let key = BodyKey {
+            id,
+            detail: node.detail,
+        };
+        if !self.line_numbers.contains_key(&key) {
+            let body = node.body()?;
+            let numbers = body.line_numbers.collect(body.line_spans.len())?;
+            let layout = text_engine.layout_line_numbers(&numbers, LINE_NUMBER);
+            self.line_numbers.insert(key, layout);
+        }
+        self.line_numbers.get(&key)
     }
 
     pub fn line_bars(&mut self, id: NodeId, node: &Node, char_advance: f64) -> &BezPath {
@@ -115,13 +139,14 @@ fn build_line_bars(node: &Node, char_advance: f64) -> BezPath {
         return path;
     };
     let bar_height = LINE_HEIGHT * LINE_BAR_HEIGHT_RATIO;
+    let gutter = line_number_gutter_width(node, char_advance) / text_scale(node);
     for (index, span) in body.line_spans.iter().enumerate() {
         let length = span.length.min(MAX_FILE_COLUMNS);
         if length <= span.indent {
             continue;
         }
-        let x0 = FILE_PADDING + span.indent as f64 * char_advance;
-        let x1 = FILE_PADDING + length as f64 * char_advance;
+        let x0 = FILE_PADDING + gutter + span.indent as f64 * char_advance;
+        let x1 = FILE_PADDING + gutter + length as f64 * char_advance;
         let y0 = index as f64 * LINE_HEIGHT + (LINE_HEIGHT - bar_height) * 0.5;
         path.extend(Rect::new(x0, y0, x1, y0 + bar_height).path_elements(0.1));
     }

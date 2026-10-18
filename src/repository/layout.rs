@@ -7,6 +7,9 @@ use vello::kurbo::{Point, Rect, Size, Vec2};
 
 pub const CODE_FONT_SIZE: f64 = 14.0;
 pub const LINE_HEIGHT: f64 = 20.0;
+pub const LINE_NUMBER_FONT_SIZE: f64 = 10.0;
+const LINE_NUMBER_GAP_COLUMNS: f64 = 1.0;
+pub const LINE_NUMBER_INSET: f64 = 6.0;
 pub const FILE_PADDING: f64 = 16.0;
 pub const FILE_HEADER_HEIGHT: f64 = 50.0;
 pub const FILE_HEADER_LABEL_SIZE: f64 = 16.0;
@@ -46,6 +49,19 @@ pub fn apply_layout(
     let mut measurements: Vec<Option<Measurement>> = (0..nodes.len()).map(|_| None).collect();
     measure(nodes, NodeId(0), char_advance, &context, &mut measurements);
     place(nodes, NodeId(0), Point::ZERO, &measurements);
+}
+
+pub fn line_number_gutter_width(node: &Node, char_advance: f64) -> f64 {
+    let Some(body) = node.body() else {
+        return 0.0;
+    };
+    let Some(max_number) = body.line_numbers.max(body.line_spans.len()) else {
+        return 0.0;
+    };
+    let digit_count = max_number.to_string().len() as f64;
+    let digit_advance = char_advance * LINE_NUMBER_FONT_SIZE / CODE_FONT_SIZE;
+    let numbers_width = digit_count * digit_advance + LINE_NUMBER_GAP_COLUMNS * char_advance;
+    (LINE_NUMBER_INSET + numbers_width * text_scale(node) - FILE_PADDING).max(0.0)
 }
 
 pub fn content_origin(node: &Node) -> Point {
@@ -169,8 +185,7 @@ fn measure_file(node: &Node, char_advance: f64) -> Measurement {
         Detail::Expanded => MIN_FILE_COLUMNS as f64,
         _ => MIN_COLLAPSED_COLUMNS,
     };
-    let width = body_size
-        .width
+    let width = (body_size.width + line_number_gutter_width(node, char_advance))
         .max(label_width)
         .max(min_columns * char_advance * scale);
     let header_height = snap(FILE_HEADER_HEIGHT * scale);

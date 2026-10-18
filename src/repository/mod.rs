@@ -3,7 +3,7 @@ use crate::arrangement::Arrangement;
 use crate::repository::edges::resolve_edges;
 use crate::repository::layout::{apply_layout, plan_columns};
 use crate::repository::loader::{LoadedFile, load_files};
-use crate::repository::view::{BodyView, TextView, build_listing_view};
+use crate::repository::view::{BodyView, LineNumbers, TextView, build_listing_view};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -411,6 +411,7 @@ impl SourceFile {
             text: self.text.as_deref()?,
             line_spans: &self.line_spans,
             highlights,
+            line_numbers: LineNumbers::Sequential,
         })
     }
 }

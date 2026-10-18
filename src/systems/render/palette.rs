@@ -17,6 +17,7 @@ pub const ORB_GLOWS: [Color; 6] = [
     Color::from_rgb8(190, 160, 255),
     Color::from_rgb8(255, 150, 120),
 ];
+pub const LINE_NUMBER: Color = Color::from_rgb8(62, 82, 110);
 pub const PANEL: Color = Color::from_rgb8(12, 36, 74);
 pub const SHADOW: Color = Color::from_rgb8(4, 14, 34);
 pub const SUCCESS: Color = Color::from_rgb8(140, 235, 170);

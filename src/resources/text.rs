@@ -1,5 +1,5 @@
 use crate::analysis::HighlightSpan;
-use crate::repository::layout::{CODE_FONT_SIZE, LINE_HEIGHT};
+use crate::repository::layout::{CODE_FONT_SIZE, LINE_HEIGHT, LINE_NUMBER_FONT_SIZE};
 use parley::{
     FontContext, FontFamily, FontWeight, Layout, LayoutContext, LineHeight, StyleProperty,
 };
@@ -74,6 +74,27 @@ impl TextEngine {
             );
         }
         let mut layout = builder.build(text);
+        layout.break_all_lines(None);
+        layout
+    }
+
+    pub fn layout_line_numbers(&mut self, numbers: &[usize], color: Color) -> Layout<ColorBrush> {
+        let width = numbers.iter().max().copied().unwrap_or(1).to_string().len();
+        let text = numbers
+            .iter()
+            .map(|number| format!("{number:>width$}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut builder =
+            self.layout_context
+                .ranged_builder(&mut self.font_context, &text, 1.0, false);
+        builder.push_default(family(FontRole::Code));
+        builder.push_default(StyleProperty::FontSize(LINE_NUMBER_FONT_SIZE as f32));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::Absolute(
+            LINE_HEIGHT as f32,
+        )));
+        builder.push_default(StyleProperty::Brush(ColorBrush(color)));
+        let mut layout = builder.build(&text);
         layout.break_all_lines(None);
         layout
     }

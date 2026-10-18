@@ -10,6 +10,7 @@ pub struct TextView {
     pub text: Arc<str>,
     pub line_spans: Vec<LineSpan>,
     pub highlights: Vec<HighlightSpan>,
+    pub source_lines: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Copy)]
@@ -17,6 +18,32 @@ pub struct BodyView<'a> {
     pub text: &'a str,
     pub line_spans: &'a [LineSpan],
     pub highlights: &'a [HighlightSpan],
+    pub line_numbers: LineNumbers<'a>,
+}
+
+#[derive(Clone, Copy)]
+pub enum LineNumbers<'a> {
+    Sequential,
+    Mapped(&'a [usize]),
+    Hidden,
+}
+
+impl LineNumbers<'_> {
+    pub fn collect(&self, row_count: usize) -> Option<Vec<usize>> {
+        match self {
+            Self::Sequential => Some((1..=row_count).collect()),
+            Self::Mapped(lines) => Some(lines.to_vec()),
+            Self::Hidden => None,
+        }
+    }
+
+    pub fn max(&self, row_count: usize) -> Option<usize> {
+        match self {
+            Self::Sequential => Some(row_count.max(1)),
+            Self::Mapped(lines) => lines.iter().copied().max(),
+            Self::Hidden => None,
+        }
+    }
 }
 
 impl TextView {
@@ -25,7 +52,15 @@ impl TextView {
             line_spans: measure_lines(&text),
             text: Arc::from(text),
             highlights,
+            source_lines: None,
         }
+    }
+
+    fn with_source_lines(mut self, source_lines: Vec<usize>) -> Self {
+        if source_lines.len() == self.line_spans.len() {
+            self.source_lines = Some(source_lines);
+        }
+        self
     }
 
     pub fn as_body(&self) -> BodyView<'_> {
@@ -33,6 +68,10 @@ impl TextView {
             text: &self.text,
             line_spans: &self.line_spans,
             highlights: &self.highlights,
+            line_numbers: match &self.source_lines {
+                Some(lines) => LineNumbers::Mapped(lines),
+                None => LineNumbers::Hidden,
+            },
         }
     }
 }
@@ -47,14 +86,18 @@ pub fn build_outline_view(path: &Path, outline: &[OutlineItem]) -> Option<TextVi
         .collect::<Vec<_>>()
         .join("\n");
     let highlights = highlight_text(path, &text);
-    Some(TextView::new(text, highlights))
+    let source_lines = outline.iter().map(|item| item.line + 1).collect();
+    Some(TextView::new(text, highlights).with_source_lines(source_lines))
 }
 
 pub fn build_summary_view(path: &Path, outline: &[OutlineItem]) -> Option<TextView> {
     let comment = line_comment(path)?;
-    let text = outline
+    let items: Vec<&OutlineItem> = outline
         .iter()
         .filter(|item| item.depth == 0 && !item.is_constant)
+        .collect();
+    let text = items
+        .iter()
         .map(|item| summarise_item(item, comment))
         .collect::<Vec<_>>()
         .join("\n");
@@ -62,7 +105,8 @@ pub fn build_summary_view(path: &Path, outline: &[OutlineItem]) -> Option<TextVi
         return None;
     }
     let highlights = highlight_text(path, &text);
-    Some(TextView::new(text, highlights))
+    let source_lines = items.iter().map(|item| item.line + 1).collect();
+    Some(TextView::new(text, highlights).with_source_lines(source_lines))
 }
 
 pub fn build_listing_view(children: &[&Node]) -> TextView {

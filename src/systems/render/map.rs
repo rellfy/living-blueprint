@@ -1,7 +1,7 @@
 use crate::analysis::SymbolKind;
 use crate::repository::layout::{
     FILE_HEADER_HEIGHT, FILE_HEADER_LABEL_SIZE, FILE_PADDING, LABEL_CHARACTER_WIDTH_RATIO,
-    LINE_HEIGHT, text_scale,
+    LINE_HEIGHT, LINE_NUMBER_INSET, line_number_gutter_width, text_scale,
 };
 use crate::repository::{Detail, Node, NodeId, Repository};
 use crate::resources::text::{FontRole, TextEngine};
@@ -289,21 +289,33 @@ impl MapPainter<'_> {
         let line_height = LINE_HEIGHT * scale;
         let first_line = ((visible.y0 - content.y0) / line_height).floor().max(0.0) as usize;
         let last_line = ((visible.y1 - content.y0) / line_height).ceil() as usize + 1;
-        let Some(layout) = self.cache.code_layout(id, node, self.text_engine) else {
-            return;
-        };
+        let gutter = line_number_gutter_width(node, self.text_engine.char_advance());
+        let gutter_transform = self.frame.transform
+            * Affine::translate((node.rect.x0 + LINE_NUMBER_INSET, content.y0))
+            * Affine::scale(scale);
         let text_transform = self.frame.transform
-            * Affine::translate((node.rect.x0 + FILE_PADDING, content.y0))
+            * Affine::translate((node.rect.x0 + FILE_PADDING + gutter, content.y0))
             * Affine::scale(scale);
         self.scene
             .push_clip_layer(Fill::NonZero, self.frame.transform, &content);
-        draw_layout_lines(
-            self.scene,
-            layout,
-            text_transform,
-            alpha as f32,
-            first_line..last_line,
-        );
+        if let Some(numbers) = self.cache.line_numbers(id, node, self.text_engine) {
+            draw_layout_lines(
+                self.scene,
+                numbers,
+                gutter_transform,
+                alpha as f32,
+                first_line..last_line,
+            );
+        }
+        if let Some(layout) = self.cache.code_layout(id, node, self.text_engine) {
+            draw_layout_lines(
+                self.scene,
+                layout,
+                text_transform,
+                alpha as f32,
+                first_line..last_line,
+            );
+        }
         self.scene.pop_layer();
     }
 
