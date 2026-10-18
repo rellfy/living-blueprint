@@ -13,7 +13,7 @@ pub const MAX_FILE_COLUMNS: u32 = 100;
 const BINARY_FILE_LINES: f64 = 2.0;
 pub const MIN_DIRECTORY_HEADER_HEIGHT: f64 = 50.0;
 pub const GRID_UNIT: f64 = 25.0;
-const TARGET_ASPECT: f64 = 16.0 / 9.0;
+const INDENT: f64 = GRID_UNIT * 2.0;
 const DIRECTORY_HEADER_RATIO: f64 = 0.03;
 const SUMMARY_TEXT_SCALE: f64 = 1.5;
 const COLLAPSED_TEXT_SCALE: f64 = 2.0;
@@ -41,37 +41,6 @@ pub fn text_scale(node: &Node) -> f64 {
     }
 }
 
-pub fn plan_columns(nodes: &mut [Node], char_advance: f64) {
-    plan_node(nodes, NodeId(0), char_advance);
-}
-
-fn plan_node(nodes: &mut [Node], id: NodeId, char_advance: f64) -> Size {
-    if !nodes[id.0].get_is_directory() {
-        return snap_size(measure_file(&nodes[id.0], char_advance).size);
-    }
-    let children = nodes[id.0].children.clone();
-    let child_sizes: Vec<Size> = children
-        .iter()
-        .map(|child| plan_node(nodes, *child, char_advance))
-        .collect();
-    let column_count = choose_column_count(&child_sizes);
-    nodes[id.0].column_count = column_count;
-    snap_size(measure_directory(&child_sizes, column_count).size)
-}
-
-fn choose_column_count(child_sizes: &[Size]) -> usize {
-    (1..=child_sizes.len().max(1))
-        .min_by(|first, second| {
-            compute_fit_cost(child_sizes, *first).total_cmp(&compute_fit_cost(child_sizes, *second))
-        })
-        .unwrap_or(1)
-}
-
-fn compute_fit_cost(child_sizes: &[Size], column_count: usize) -> f64 {
-    let size = measure_directory(child_sizes, column_count).size;
-    size.width.max(size.height * TARGET_ASPECT)
-}
-
 fn measure(
     nodes: &[Node],
     id: NodeId,
@@ -86,7 +55,7 @@ fn measure(
                 .iter()
                 .map(|child| measure(nodes, *child, char_advance, measurements))
                 .collect();
-            measure_directory(&child_sizes, node.column_count)
+            measure_directory(&child_sizes)
         }
         (true, _) => measure_collapsed_directory(node, char_advance),
         (false, _) => measure_file(node, char_advance),
@@ -187,51 +156,31 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
     )
 }
 
-fn measure_directory(child_sizes: &[Size], column_count: usize) -> Measurement {
-    let (content_size, offsets) = pack_grid(child_sizes, column_count);
+fn measure_directory(child_sizes: &[Size]) -> Measurement {
+    let content_width = child_sizes
+        .iter()
+        .map(|size| size.width)
+        .fold(0.0, f64::max);
     let header_height =
-        snap((content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT));
-    let padding = GRID_UNIT;
-    let content_origin = Vec2::new(padding, header_height);
+        snap((content_width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT));
+    let mut next_y = header_height;
+    let child_offsets = child_sizes
+        .iter()
+        .map(|size| {
+            let offset = Vec2::new(INDENT, next_y);
+            next_y += size.height + GRID_UNIT;
+            offset
+        })
+        .collect();
+    let bottom = match child_sizes.is_empty() {
+        true => header_height + GRID_UNIT,
+        false => next_y,
+    };
     Measurement {
-        size: Size::new(
-            content_size.width + padding * 2.0,
-            header_height + content_size.height + padding,
-        ),
+        size: Size::new(INDENT + content_width + GRID_UNIT, bottom),
         header_height,
-        child_offsets: offsets
-            .into_iter()
-            .map(|offset| offset + content_origin)
-            .collect(),
+        child_offsets,
     }
-}
-
-fn pack_grid(sizes: &[Size], column_count: usize) -> (Size, Vec<Vec2>) {
-    let column_count = column_count.clamp(1, sizes.len().max(1));
-    let mut placed: Vec<Rect> = Vec::with_capacity(sizes.len());
-    for (index, size) in sizes.iter().enumerate() {
-        let left = (index % column_count != 0).then(|| placed[index - 1]);
-        let above = index.checked_sub(column_count).map(|above| placed[above]);
-        let row_start = index - index % column_count;
-        let x = left.map_or(0.0, |left| left.x1 + GRID_UNIT);
-        let span = (x, x + size.width);
-        let y = placed[..row_start]
-            .iter()
-            .filter(|rect| check_overlaps_horizontally(**rect, span))
-            .chain(above.iter())
-            .map(|rect| rect.y1 + GRID_UNIT)
-            .fold(0.0, f64::max);
-        placed.push(Rect::from_origin_size(Point::new(x, y), *size));
-    }
-    let content_size = placed.iter().fold(Size::ZERO, |size, rect| {
-        Size::new(size.width.max(rect.x1), size.height.max(rect.y1))
-    });
-    let offsets = placed.iter().map(|rect| rect.origin().to_vec2()).collect();
-    (content_size, offsets)
-}
-
-fn check_overlaps_horizontally(rect: Rect, span: (f64, f64)) -> bool {
-    rect.x0 < span.1 + GRID_UNIT && span.0 < rect.x1 + GRID_UNIT
 }
 
 fn snap_size(size: Size) -> Size {

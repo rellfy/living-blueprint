@@ -168,35 +168,26 @@ mod tests {
         repository
     }
 
-    fn assert_children_keep_slots(repository: &Repository, id: NodeId) {
-        let children = &repository.node(id).children;
-        let column_count = repository
-            .node(id)
-            .column_count
-            .clamp(1, children.len().max(1));
-        for (index, child) in children.iter().enumerate() {
+    fn assert_children_stack_as_tree(repository: &Repository, id: NodeId) {
+        let parent = repository.node(id).target_rect;
+        let mut previous_bottom = parent.y0 + repository.node(id).header_height;
+        for child in &repository.node(id).children {
             let rect = repository.node(*child).target_rect;
-            let left = index
-                .checked_sub(1)
-                .filter(|_| index % column_count != 0)
-                .map(|left| repository.node(children[left]).target_rect);
-            let above = index
-                .checked_sub(column_count)
-                .map(|above| repository.node(children[above]).target_rect);
-            assert!(left.is_none_or(|left| left.x1 <= rect.x0));
-            assert!(above.is_none_or(|above| above.y1 <= rect.y0));
+            assert!(rect.x0 > parent.x0);
+            assert!(rect.y0 >= previous_bottom);
+            previous_bottom = rect.y1;
         }
     }
 
     #[test]
-    fn children_keep_their_slots_across_details() {
+    fn children_stack_top_down_across_details() {
         let mut repository = load();
         let root = repository.root_id();
         let src = repository.find_by_path(Path::new("src")).unwrap();
         loop {
             for id in [root, src] {
                 if repository.node(id).get_is_expanded_directory() {
-                    assert_children_keep_slots(&repository, id);
+                    assert_children_stack_as_tree(&repository, id);
                 }
             }
             if !repository.compress(root) {
