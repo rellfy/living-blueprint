@@ -38,11 +38,7 @@ The user may iterate their blueprint/code at their preferred high-low level deta
 
 The living blueprint is available as a GUI natively for Linux, Mac and Windows.
 
-## The Agents
+## Coding Agents
 
 Coding agents are shown in the map as floating orbs. They float around the areas that they are working with.
 
-## Reviewing Changes
-
-Blueprints can be diffed with each other, and merged.
-It's all Git underneath. Blueprints are just a rendering of the repository.
