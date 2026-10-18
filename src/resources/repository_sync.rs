@@ -1,3 +1,5 @@
+use crate::arrangement::storage::load_arrangement;
+use crate::blueprint_directory::BLUEPRINT_DIRECTORY_NAME;
 use crate::repository::Repository;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
@@ -9,7 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
-const IGNORED_DIRECTORY_NAMES: [&str; 3] = [".git", "target", "node_modules"];
+const IGNORED_DIRECTORY_NAMES: [&str; 4] =
+    [".git", "target", "node_modules", BLUEPRINT_DIRECTORY_NAME];
 
 pub struct RepositorySync {
     root: PathBuf,
@@ -134,7 +137,11 @@ impl RepositorySync {
         let root = self.root.clone();
         let char_advance = self.char_advance;
         thread::spawn(move || {
-            let _ = sender.send(Repository::load(&root, char_advance));
+            let repository = Repository::load(&root, char_advance).map(|mut repository| {
+                repository.set_arrangement(load_arrangement(&root));
+                repository
+            });
+            let _ = sender.send(repository);
         });
         self.pending_load = Some(receiver);
     }

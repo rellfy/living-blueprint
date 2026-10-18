@@ -2,6 +2,7 @@ use crate::State;
 use crate::resources::pointer::PointerRelease;
 use crate::resources::prompt::Motion;
 use crate::systems::agent::submit_prompt;
+use crate::systems::drag::{begin_drag, end_drag, get_is_dragging_node, update_drag};
 use crate::systems::semantic_zoom::{zoom_all_semantically, zoom_semantically};
 use vello::kurbo::{Point, Size};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
@@ -11,7 +12,12 @@ const ZOOM_PER_LINE: f64 = 1.18;
 const ZOOM_PER_PIXEL: f64 = 1.004;
 
 pub fn handle_cursor_moved(state: &mut State, position: Point) {
-    let Some(delta) = state.pointer.move_to(position) else {
+    let delta = state.pointer.move_to(position);
+    if get_is_dragging_node(state) {
+        update_drag(state);
+        return;
+    }
+    let Some(delta) = delta else {
         return;
     };
     state.camera.pan_by_screen(delta);
@@ -19,7 +25,7 @@ pub fn handle_cursor_moved(state: &mut State, position: Point) {
 
 pub fn handle_mouse_button(state: &mut State, button: MouseButton, element_state: ElementState) {
     match (button, element_state) {
-        (MouseButton::Left, ElementState::Pressed) => state.pointer.press(),
+        (MouseButton::Left, ElementState::Pressed) => handle_press(state),
         (MouseButton::Left, ElementState::Released) => handle_release(state),
         (MouseButton::Right, ElementState::Pressed) => zoom_semantically(state, false),
         _ => {}
@@ -65,6 +71,9 @@ pub fn update_hover(state: &mut State) {
     let world_point = state
         .camera
         .screen_to_world(state.pointer.position, viewport);
+    if get_is_dragging_node(state) {
+        return;
+    }
     state.hovered = match state.pointer.get_is_dragging() {
         true => state.hovered,
         false => state
@@ -187,7 +196,17 @@ fn right_motion(modifiers: ModifiersState) -> Motion {
     }
 }
 
+fn handle_press(state: &mut State) {
+    if state.modifiers.shift_key() && begin_drag(state) {
+        return;
+    }
+    state.pointer.press();
+}
+
 fn handle_release(state: &mut State) {
+    if end_drag(state) {
+        return;
+    }
     match state.pointer.release() {
         PointerRelease::Click => zoom_semantically(state, true),
         PointerRelease::Drag(velocity) => state.camera.release_with_velocity(velocity),

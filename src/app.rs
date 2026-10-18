@@ -1,4 +1,5 @@
 use crate::State;
+use crate::systems::view_state::save_current_view_state;
 use std::path::PathBuf;
 use std::sync::Arc;
 use winit::application::ApplicationHandler;
@@ -40,6 +41,7 @@ impl ApplicationHandler for App {
             return;
         };
         if matches!(event, WindowEvent::CloseRequested) {
+            save_current_view_state(state);
             event_loop.exit();
             return;
         }

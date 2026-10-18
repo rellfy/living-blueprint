@@ -6,10 +6,13 @@ use winit::event_loop::EventLoop;
 pub mod agent;
 pub mod analysis;
 pub mod app;
+pub mod arrangement;
+pub mod blueprint_directory;
 pub mod repository;
 pub mod resources;
 pub mod state;
 pub mod systems;
+pub mod view_state;
 
 pub use crate::state::State;
 

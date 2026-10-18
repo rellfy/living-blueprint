@@ -2,6 +2,7 @@ use crate::State;
 use crate::repository::Repository;
 use crate::resources::repository_sync::SyncUpdate;
 use crate::systems::input::viewport_size;
+use crate::systems::view_state::restore_view_state;
 use std::path::PathBuf;
 
 pub fn update_repository(state: &mut State) {
@@ -24,7 +25,7 @@ fn install_repository(state: &mut State, mut repository: Repository, changed_pat
         repository.inherit(previous);
         state.render_state.cache.migrate(previous, &repository);
     }
-    if state.repository.is_none() {
+    if state.repository.is_none() && !restore_view_state(state, &mut repository) {
         let readable_zoom = state.window.scale_factor();
         state
             .camera

@@ -1,14 +1,18 @@
 use crate::analysis::FileAnalysis;
+use crate::arrangement::Arrangement;
 use crate::repository::edges::resolve_edges;
 use crate::repository::layout::{apply_layout, plan_columns};
 use crate::repository::loader::{LoadedFile, load_files};
 use crate::repository::view::{BodyView, TextView, build_listing_view};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vello::kurbo::{Point, Rect};
 
+pub mod arrange;
 pub mod detail;
 pub mod edges;
 pub mod layout;
@@ -28,6 +32,8 @@ pub struct Repository {
     edges: Vec<Edge>,
     ids_by_path: HashMap<PathBuf, NodeId>,
     char_advance: f64,
+    arrangement: Arrangement,
+    dragged_path: Option<PathBuf>,
 }
 
 pub struct Node {
@@ -56,7 +62,8 @@ pub struct SourceFile {
     pub summary: Option<TextView>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Detail {
     Collapsed,
     Summary,
@@ -89,6 +96,8 @@ impl Repository {
     }
 
     pub fn inherit(&mut self, previous: &Repository) {
+        self.arrangement = previous.arrangement.clone();
+        self.dragged_path = previous.dragged_path.clone();
         let mut fresh_ids = Vec::new();
         for (index, node) in self.nodes.iter_mut().enumerate() {
             let Some(previous_id) = previous.find_by_path(&node.path) else {
@@ -103,6 +112,26 @@ impl Repository {
         for index in fresh_ids {
             self.nodes[index].rect = self.nodes[index].target_rect;
         }
+    }
+
+    pub fn details(&self) -> BTreeMap<PathBuf, Detail> {
+        self.nodes
+            .iter()
+            .filter(|node| node.detail != Detail::Collapsed)
+            .map(|node| (node.path.clone(), node.detail))
+            .collect()
+    }
+
+    pub fn restore_details(&mut self, details: &BTreeMap<PathBuf, Detail>) {
+        for node in &mut self.nodes {
+            let detail = details
+                .get(&node.path)
+                .copied()
+                .unwrap_or(Detail::Collapsed);
+            node.detail = node.nearest_available_detail(detail);
+        }
+        self.relayout();
+        self.snap_rects();
     }
 
     pub fn set_all_details(&mut self, detail: Detail) {
@@ -123,7 +152,12 @@ impl Repository {
     }
 
     pub fn relayout(&mut self) {
-        apply_layout(&mut self.nodes, self.char_advance);
+        apply_layout(
+            &mut self.nodes,
+            self.char_advance,
+            &self.arrangement,
+            self.dragged_path.as_deref(),
+        );
     }
 
     pub fn animate(&mut self, delta_time: f64) -> bool {
@@ -209,7 +243,7 @@ impl Repository {
         visible
     }
 
-    fn snap_rects(&mut self) {
+    pub fn snap_rects(&mut self) {
         for node in &mut self.nodes {
             node.rect = node.target_rect;
         }
@@ -233,6 +267,8 @@ impl Repository {
             edges: Vec::new(),
             ids_by_path: HashMap::new(),
             char_advance,
+            arrangement: Arrangement::default(),
+            dragged_path: None,
         };
         repository.ids_by_path.insert(PathBuf::new(), NodeId(0));
         for file in files {
@@ -463,6 +499,24 @@ mod tests {
         assert!(parent.rect.contains(main.rect.origin()));
         assert_eq!(repository.hit_test(main.rect.center()), Some(main_id));
         assert!(!repository.edges().is_empty());
+    }
+
+    #[test]
+    fn restores_captured_details() {
+        let mut repository = load_expanded();
+        let main = Path::new("src/main.rs");
+        let id = repository.find_by_path(main).unwrap();
+        repository.compress(id);
+        let details = repository.details();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut restored = Repository::load(root, CODE_FONT_SIZE * 0.6).unwrap();
+        restored.restore_details(&details);
+        assert_eq!(restored.details(), details);
+        let restored_id = restored.find_by_path(main).unwrap();
+        assert_eq!(
+            restored.node(restored_id).target_rect,
+            restored.node(restored_id).rect
+        );
     }
 
     #[test]

@@ -39,6 +39,19 @@ impl Camera {
         self.zoom
     }
 
+    pub fn center(&self) -> Point {
+        self.center
+    }
+
+    pub fn restore(&mut self, center: Point, zoom: f64) {
+        self.center = center;
+        self.target_center = center;
+        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        self.target_zoom = self.zoom;
+        self.zoom_anchor = None;
+        self.screen_velocity = Vec2::ZERO;
+    }
+
     pub fn update(&mut self, delta_time: f64, viewport: Size) {
         let blend = 1.0 - (-SMOOTHING_RATE * delta_time).exp();
         self.zoom = (self.zoom.ln() + (self.target_zoom.ln() - self.zoom.ln()) * blend).exp();

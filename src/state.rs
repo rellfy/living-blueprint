@@ -10,6 +10,7 @@ use crate::resources::text::TextEngine;
 use crate::resources::wgpu::WgpuResource;
 use crate::systems::agent::state::AgentState;
 use crate::systems::agent::update_agent;
+use crate::systems::drag::state::DragState;
 use crate::systems::input::{
     handle_cursor_moved, handle_key, handle_mouse_button, handle_mouse_wheel, update_hover,
     viewport_size,
@@ -19,6 +20,8 @@ use crate::systems::render::render;
 use crate::systems::render::state::RenderState;
 use crate::systems::repository_sync::update_repository;
 use crate::systems::semantic_zoom::update_semantic_zoom;
+use crate::systems::view_state::state::ViewStateSync;
+use crate::systems::view_state::update_view_state;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -43,6 +46,8 @@ pub struct State {
     pub agent_sessions: AgentSessions,
     pub agent_feed: AgentFeed,
     pub agent_state: AgentState,
+    pub drag_state: DragState,
+    pub view_state_sync: ViewStateSync,
     pub repository_root: PathBuf,
     pub repository: Option<Repository>,
     pub repository_sync: RepositorySync,
@@ -73,6 +78,8 @@ impl State {
             agent_sessions: AgentSessions::default(),
             agent_feed: AgentFeed::default(),
             agent_state: AgentState::new(&repository_root),
+            drag_state: DragState::default(),
+            view_state_sync: ViewStateSync::default(),
             repository_root,
             repository: None,
             repository_sync,
@@ -109,6 +116,7 @@ impl State {
         update_hover(self);
         update_agent(self);
         update_prompt(self);
+        update_view_state(self);
         render(self);
     }
 

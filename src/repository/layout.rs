@@ -1,5 +1,8 @@
+use crate::arrangement::Arrangement;
+use crate::arrangement::resolve::{ArrangedChild, resolve_offsets};
 use crate::repository::view::BodyView;
 use crate::repository::{Detail, Node, NodeId};
+use std::path::Path;
 use vello::kurbo::{Point, Rect, Size, Vec2};
 
 pub const CODE_FONT_SIZE: f64 = 14.0;
@@ -25,10 +28,28 @@ struct Measurement {
     child_offsets: Vec<Vec2>,
 }
 
-pub fn apply_layout(nodes: &mut [Node], char_advance: f64) {
+struct ArrangementContext<'a> {
+    arrangement: &'a Arrangement,
+    pinned: Option<&'a Path>,
+}
+
+pub fn apply_layout(
+    nodes: &mut [Node],
+    char_advance: f64,
+    arrangement: &Arrangement,
+    pinned: Option<&Path>,
+) {
+    let context = ArrangementContext {
+        arrangement,
+        pinned,
+    };
     let mut measurements: Vec<Option<Measurement>> = (0..nodes.len()).map(|_| None).collect();
-    measure(nodes, NodeId(0), char_advance, &mut measurements);
+    measure(nodes, NodeId(0), char_advance, &context, &mut measurements);
     place(nodes, NodeId(0), Point::ZERO, &measurements);
+}
+
+pub fn content_origin(node: &Node) -> Point {
+    node.target_rect.origin() + Vec2::new(GRID_UNIT, node.header_height)
 }
 
 pub fn text_scale(node: &Node) -> f64 {
@@ -76,6 +97,7 @@ fn measure(
     nodes: &[Node],
     id: NodeId,
     char_advance: f64,
+    context: &ArrangementContext,
     measurements: &mut Vec<Option<Measurement>>,
 ) -> Size {
     let node = &nodes[id.0];
@@ -84,9 +106,16 @@ fn measure(
             let child_sizes: Vec<Size> = node
                 .children
                 .iter()
-                .map(|child| measure(nodes, *child, char_advance, measurements))
+                .map(|child| measure(nodes, *child, char_advance, context, measurements))
                 .collect();
-            measure_directory(&child_sizes, node.column_count)
+            let child_paths = node
+                .children
+                .iter()
+                .map(|child| nodes[child.0].path.as_path());
+            match context.arrangement.check_is_arranged(child_paths) {
+                true => measure_arranged_directory(nodes, node, &child_sizes, context),
+                false => measure_directory(&child_sizes, node.column_count),
+            }
         }
         (true, _) => measure_collapsed_directory(node, char_advance),
         (false, _) => measure_file(node, char_advance),
@@ -189,6 +218,43 @@ fn measure_body(body: BodyView, char_advance: f64) -> Size {
 
 fn measure_directory(child_sizes: &[Size], column_count: usize) -> Measurement {
     let (content_size, offsets) = pack_grid(child_sizes, column_count);
+    wrap_directory_content(content_size, offsets)
+}
+
+fn measure_arranged_directory(
+    nodes: &[Node],
+    node: &Node,
+    child_sizes: &[Size],
+    context: &ArrangementContext,
+) -> Measurement {
+    let children: Vec<ArrangedChild> = node
+        .children
+        .iter()
+        .zip(child_sizes)
+        .map(|(child, size)| {
+            let path = nodes[child.0].path.as_path();
+            ArrangedChild {
+                size: *size,
+                desired: context.arrangement.position(path),
+                is_pinned: context.pinned == Some(path),
+            }
+        })
+        .collect();
+    let offsets = resolve_offsets(&children, GRID_UNIT);
+    let content_size =
+        offsets
+            .iter()
+            .zip(child_sizes)
+            .fold(Size::ZERO, |content, (offset, size)| {
+                Size::new(
+                    content.width.max(offset.x + size.width),
+                    content.height.max(offset.y + size.height),
+                )
+            });
+    wrap_directory_content(content_size, offsets)
+}
+
+fn wrap_directory_content(content_size: Size, offsets: Vec<Vec2>) -> Measurement {
     let header_height =
         snap((content_size.width * DIRECTORY_HEADER_RATIO).max(MIN_DIRECTORY_HEADER_HEIGHT));
     let padding = GRID_UNIT;

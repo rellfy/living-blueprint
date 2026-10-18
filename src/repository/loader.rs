@@ -1,4 +1,5 @@
 use crate::analysis::analyse;
+use crate::blueprint_directory::check_is_blueprint_path;
 use crate::repository::SourceFile;
 use crate::repository::view::{TextView, build_outline_view, build_summary_view, measure_lines};
 use std::fs;
@@ -31,6 +32,10 @@ pub fn load_files(root: &Path) -> io::Result<Vec<LoadedFile>> {
         Some(paths) => paths,
         None => list_files_recursively(root, Path::new(""))?,
     };
+    let paths = paths
+        .into_iter()
+        .filter(|path| !check_is_blueprint_path(path))
+        .collect();
     Ok(load_in_parallel(root, paths))
 }
 

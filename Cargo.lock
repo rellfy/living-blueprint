@@ -1295,6 +1295,7 @@ dependencies = [
  "notify",
  "parley",
  "pollster",
+ "serde",
  "serde_json",
  "tree-sitter",
  "tree-sitter-go",
