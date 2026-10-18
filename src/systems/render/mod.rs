@@ -1,6 +1,7 @@
 use crate::State;
 use crate::systems::render::background::draw_background;
 use crate::systems::render::edges::{collect_linked_nodes, draw_edges};
+use crate::systems::render::land::draw_lands;
 use crate::systems::render::map::MapPainter;
 use crate::systems::render::overlay::OverlayPainter;
 use crate::systems::render::palette::BACKGROUND;
@@ -13,6 +14,7 @@ use wgpu::{
 pub mod background;
 pub mod cache;
 pub mod edges;
+pub mod land;
 pub mod map;
 pub mod orb;
 pub mod overlay;
@@ -56,6 +58,7 @@ fn compose_scene(state: &mut State) {
     render_state.cache.begin_frame();
     draw_background(&mut render_state.scene, &frame);
     if let Some(repository) = &state.repository {
+        draw_lands(&mut render_state.scene, repository, &frame);
         draw_edges(&mut render_state.scene, repository, &frame, state.hovered);
         MapPainter {
             scene: &mut render_state.scene,
@@ -215,6 +218,7 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
+            draw_lands(&mut scene, &repository, &frame);
             draw_edges(&mut scene, &repository, &frame, None);
             MapPainter {
                 scene: &mut scene,
@@ -327,6 +331,7 @@ mod tests {
             let mut scene = Scene::new();
             cache.begin_frame();
             draw_background(&mut scene, &frame);
+            draw_lands(&mut scene, &repository, &frame);
             draw_edges(&mut scene, &repository, &frame, Some(camera_id));
             MapPainter {
                 scene: &mut scene,

@@ -6,6 +6,7 @@ use crate::repository::layout::{
 use crate::repository::{Detail, Node, NodeId, Repository};
 use crate::resources::text::{FontRole, TextEngine};
 use crate::systems::render::cache::{LABEL_FONT_SIZE, RenderCache};
+use crate::systems::render::land::Land;
 use crate::systems::render::palette::{ACCENT, INK, INK_DIM};
 use crate::systems::render::text::{draw_layout, draw_layout_lines};
 use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
@@ -17,11 +18,8 @@ use vello::peniko::{Color, Fill, Mix};
 const MIN_NODE_SCREEN_SIZE: f64 = 2.0;
 const NODE_STROKE_PX: f64 = 1.25;
 const CORNER_RADIUS_PX: f64 = 6.0;
-const DIRECTORY_FILL: Color = Color::from_rgba8(255, 255, 255, 7);
 const FILE_FILL: Color = Color::from_rgba8(21, 36, 56, 240);
 const FILE_FILL_HOVERED: Color = Color::from_rgba8(27, 45, 71, 245);
-const COLLAPSED_DIRECTORY_FILL: Color = Color::from_rgba8(30, 74, 132, 235);
-const COLLAPSED_DIRECTORY_FILL_HOVERED: Color = Color::from_rgba8(40, 90, 152, 240);
 const CODE_FADE_START_PX: f64 = 5.0;
 const CODE_FADE_END_PX: f64 = 9.0;
 const BARS_FADE_START_PX: f64 = 0.3;
@@ -103,20 +101,21 @@ impl MapPainter<'_> {
     }
 
     fn draw_directory(&mut self, id: NodeId, node: &Node) {
-        let stroke_color = self.pick_stroke(id, DIRECTORY_FILL);
-        self.draw_box(node.rect, DIRECTORY_FILL, stroke_color);
-        self.draw_separator(node.rect, node.header_height, 0.25);
         for child in &node.children {
             self.draw_node(*child);
+        }
+        if self.hovered == Some(id) {
+            self.stroke_box(node.rect, INK);
         }
         self.draw_directory_label(node);
     }
 
     fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas(node);
+        let land = Land::of(self.repository, id);
         let (header_fill, body_fill) = match self.hovered == Some(id) {
-            true => (COLLAPSED_DIRECTORY_FILL_HOVERED, FILE_FILL_HOVERED),
-            false => (COLLAPSED_DIRECTORY_FILL, FILE_FILL),
+            true => (land.header_hovered, FILE_FILL_HOVERED),
+            false => (land.header, FILE_FILL),
         };
         let rect = node.rect;
         let header_bottom = (rect.y0 + node.header_height).min(rect.y1);
