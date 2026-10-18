@@ -12,7 +12,7 @@ use crate::systems::render::{FrameContext, check_overlaps, smoothstep};
 use std::collections::HashSet;
 use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Line, Point, Rect, RoundedRect, Shape, Stroke, Vec2};
-use vello::peniko::{Color, Fill};
+use vello::peniko::{Color, Fill, Mix};
 
 const MIN_NODE_SCREEN_SIZE: f64 = 2.0;
 const NODE_STROKE_PX: f64 = 1.25;
@@ -37,6 +37,7 @@ const MIN_DEFINITION_SPACING_PX: f64 = 14.0;
 const MIN_DEFINITION_FILE_WIDTH_PX: f64 = 80.0;
 const LINK_GLOW_PX: f64 = 10.0;
 const LINK_GLOW_ALPHA: f32 = 0.55;
+const UNCONNECTED_ALPHA: f32 = 0.35;
 
 pub struct MapPainter<'a> {
     pub scene: &'a mut Scene,
@@ -72,15 +73,37 @@ impl MapPainter<'_> {
         if self.linked.contains(&id) {
             self.draw_link_glow(node.rect);
         }
+        let is_dimmed = self.check_is_dimmed(id, node);
+        if is_dimmed {
+            let clip = node.rect.inflate(node.rect.width(), node.rect.height());
+            self.scene.push_layer(
+                Fill::NonZero,
+                Mix::Normal,
+                UNCONNECTED_ALPHA,
+                self.frame.transform,
+                &clip,
+            );
+        }
         match (node.get_is_directory(), node.detail) {
             (true, Detail::Expanded) => self.draw_directory(id, node),
             (true, _) => self.draw_collapsed_directory(id, node),
             (false, _) => self.draw_file(id, node),
         }
+        if is_dimmed {
+            self.scene.pop_layer();
+        }
+    }
+
+    fn check_is_dimmed(&self, id: NodeId, node: &Node) -> bool {
+        let is_focusing = self
+            .hovered
+            .is_some_and(|hovered| !self.repository.node(hovered).get_is_expanded_directory());
+        let is_connected = self.hovered == Some(id) || self.linked.contains(&id);
+        is_focusing && !is_connected && !node.get_is_expanded_directory()
     }
 
     fn draw_directory(&mut self, id: NodeId, node: &Node) {
-        let stroke_color = self.pick_stroke(id, INK.multiply_alpha(0.55));
+        let stroke_color = self.pick_stroke(id, DIRECTORY_FILL);
         self.draw_box(node.rect, DIRECTORY_FILL, stroke_color);
         self.draw_separator(node.rect, node.header_height, 0.25);
         for child in &node.children {
@@ -91,12 +114,17 @@ impl MapPainter<'_> {
 
     fn draw_collapsed_directory(&mut self, id: NodeId, node: &Node) {
         let (code_alpha, bars_alpha) = self.compute_body_alphas(node);
-        let fill = match self.hovered == Some(id) {
-            true => COLLAPSED_DIRECTORY_FILL_HOVERED,
-            false => COLLAPSED_DIRECTORY_FILL,
+        let (header_fill, body_fill) = match self.hovered == Some(id) {
+            true => (COLLAPSED_DIRECTORY_FILL_HOVERED, FILE_FILL_HOVERED),
+            false => (COLLAPSED_DIRECTORY_FILL, FILE_FILL),
         };
-        let stroke = self.pick_stroke(id, INK.multiply_alpha(0.75));
-        self.draw_box(node.rect, fill, stroke);
+        let rect = node.rect;
+        let header_bottom = (rect.y0 + node.header_height).min(rect.y1);
+        let header = Rect::new(rect.x0, rect.y0, rect.x1, header_bottom);
+        let body = Rect::new(rect.x0, header_bottom, rect.x1, rect.y1);
+        self.fill_box_section(rect, header, header_fill);
+        self.fill_box_section(rect, body, body_fill);
+        self.stroke_box(rect, self.pick_stroke(id, body_fill));
         self.draw_separator(node.rect, node.header_height, 0.3 * code_alpha as f32);
         self.draw_line_bars(id, node, bars_alpha);
         self.draw_code(id, node, code_alpha);
@@ -109,7 +137,7 @@ impl MapPainter<'_> {
             true => FILE_FILL_HOVERED,
             false => FILE_FILL,
         };
-        let stroke = self.pick_stroke(id, INK.multiply_alpha(0.75));
+        let stroke = self.pick_stroke(id, fill);
         self.draw_box(node.rect, fill, stroke);
         let has_body = node.body().is_some();
         let separator_alpha = match has_body {
@@ -126,11 +154,11 @@ impl MapPainter<'_> {
         }
     }
 
-    fn pick_stroke(&self, id: NodeId, idle: Color) -> Color {
-        let is_highlighted = self.hovered == Some(id) || self.linked.contains(&id);
-        match is_highlighted {
-            true => ACCENT,
-            false => idle,
+    fn pick_stroke(&self, id: NodeId, fill: Color) -> Color {
+        match (self.hovered == Some(id), self.linked.contains(&id)) {
+            (true, _) => INK,
+            (false, true) => ACCENT,
+            (false, false) => fill,
         }
     }
 
@@ -177,13 +205,28 @@ impl MapPainter<'_> {
     }
 
     fn draw_box(&mut self, rect: Rect, fill: Color, stroke: Color) {
-        let zoom = self.frame.zoom;
-        let radius = self.compute_corner_radius(rect);
-        let shape = RoundedRect::from_rect(rect, radius);
+        let shape = RoundedRect::from_rect(rect, self.compute_corner_radius(rect));
         self.scene
             .fill(Fill::NonZero, self.frame.transform, fill, None, &shape);
+        self.stroke_box(rect, stroke);
+    }
+
+    fn fill_box_section(&mut self, rect: Rect, section: Rect, fill: Color) {
+        if section.is_zero_area() {
+            return;
+        }
+        let shape = RoundedRect::from_rect(rect, self.compute_corner_radius(rect));
+        self.scene
+            .push_clip_layer(Fill::NonZero, self.frame.transform, &section);
+        self.scene
+            .fill(Fill::NonZero, self.frame.transform, fill, None, &shape);
+        self.scene.pop_layer();
+    }
+
+    fn stroke_box(&mut self, rect: Rect, stroke: Color) {
+        let shape = RoundedRect::from_rect(rect, self.compute_corner_radius(rect));
         self.scene.stroke(
-            &Stroke::new(NODE_STROKE_PX * self.frame.scale_factor / zoom),
+            &Stroke::new(NODE_STROKE_PX * self.frame.scale_factor / self.frame.zoom),
             self.frame.transform,
             stroke,
             None,
