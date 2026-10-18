@@ -8,7 +8,15 @@ pub const INK: Color = Color::from_rgb8(226, 238, 255);
 pub const INK_DIM: Color = Color::from_rgb8(150, 182, 224);
 pub const ACCENT: Color = Color::from_rgb8(255, 206, 120);
 pub const ORB_CORE: Color = Color::from_rgb8(240, 250, 255);
-pub const ORB_GLOW: Color = Color::from_rgb8(120, 220, 255);
+pub const ORB_GLOW: Color = ORB_GLOWS[0];
+pub const ORB_GLOWS: [Color; 6] = [
+    Color::from_rgb8(120, 220, 255),
+    Color::from_rgb8(255, 200, 110),
+    Color::from_rgb8(255, 140, 200),
+    Color::from_rgb8(140, 240, 160),
+    Color::from_rgb8(190, 160, 255),
+    Color::from_rgb8(255, 150, 120),
+];
 pub const PANEL: Color = Color::from_rgb8(12, 36, 74);
 pub const SHADOW: Color = Color::from_rgb8(4, 14, 34);
 pub const SUCCESS: Color = Color::from_rgb8(140, 235, 170);

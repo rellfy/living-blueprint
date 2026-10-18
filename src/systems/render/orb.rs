@@ -1,12 +1,12 @@
 use crate::repository::Repository;
 use crate::resources::agent_sessions::{AgentSession, AgentSessions, AgentStatus};
 use crate::systems::render::FrameContext;
-use crate::systems::render::palette::{ORB_CORE, ORB_GLOW};
+use crate::systems::render::palette::{ORB_CORE, ORB_GLOWS};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use vello::Scene;
 use vello::kurbo::{Affine, Circle, Point, Rect, Stroke, Vec2};
-use vello::peniko::Fill;
+use vello::peniko::{Color, Fill};
 
 const CORE_RADIUS_PX: f64 = 9.0;
 const GLOW_RADIUS_PX: f64 = 26.0;
@@ -18,20 +18,31 @@ const FADE_RATE: f64 = 4.0;
 const LINGER_SECONDS: f64 = 1.5;
 const WANDER_SPEED: f64 = 0.6;
 const WANDER_RATIO: f64 = 0.18;
-const FREE_WANDER_PX: f64 = 60.0;
+const HOME_HEIGHT_PX: f64 = 44.0;
+const HOME_SPACING_PX: f64 = 56.0;
+const HOME_WANDER_PX: f64 = 8.0;
+const ROOT_LABEL_INSET_RATIO: f64 = 0.45;
 const MIN_VISIBILITY: f64 = 0.01;
 const PHASE_SPREAD_SECONDS: u64 = 1000;
 
 #[derive(Default)]
 pub struct Orbs {
     orbs: HashMap<String, Orb>,
+    spawned_count: usize,
 }
 
 pub struct Orb {
     pub position: Point,
     pub visibility: f64,
     pub phase: f64,
+    pub glow: Color,
+    pub slot: usize,
     pub is_placed: bool,
+}
+
+enum OrbAnchor {
+    Focus(Rect),
+    Home(Point),
 }
 
 impl Orbs {
@@ -42,15 +53,26 @@ impl Orbs {
         frame: &FrameContext,
     ) {
         for session_id in sessions.sessions.keys() {
-            self.orbs
-                .entry(session_id.clone())
-                .or_insert_with(|| Orb::new(spread_phase(session_id)));
+            if self.orbs.contains_key(session_id) {
+                continue;
+            }
+            let glow = ORB_GLOWS[self.spawned_count % ORB_GLOWS.len()];
+            let slot = self.find_free_slot();
+            self.spawned_count += 1;
+            self.orbs.insert(
+                session_id.clone(),
+                Orb::new(spread_phase(session_id), glow, slot),
+            );
         }
+        let home_origin = compute_home_origin(repository, frame);
         for (session_id, orb) in &mut self.orbs {
             let session = sessions.sessions.get(session_id);
-            let focus = session.and_then(|session| find_focus_rect(session, repository));
+            let anchor = match session.and_then(|session| find_focus_rect(session, repository)) {
+                Some(rect) => OrbAnchor::Focus(rect),
+                None => OrbAnchor::Home(compute_home(home_origin, orb.slot, frame)),
+            };
             let is_shown = session.is_some_and(check_is_shown);
-            orb.animate(is_shown, focus, frame);
+            orb.animate(is_shown, anchor, frame);
         }
         self.orbs.retain(|session_id, orb| {
             sessions.sessions.contains_key(session_id) || orb.visibility > MIN_VISIBILITY
@@ -62,21 +84,29 @@ impl Orbs {
             draw_orb(scene, orb, frame);
         }
     }
+
+    fn find_free_slot(&self) -> usize {
+        (0..)
+            .find(|slot| !self.orbs.values().any(|orb| orb.slot == *slot))
+            .expect("a free slot always exists")
+    }
 }
 
 impl Orb {
-    pub fn new(phase: f64) -> Self {
+    pub fn new(phase: f64, glow: Color, slot: usize) -> Self {
         Self {
             position: Point::ZERO,
             visibility: 0.0,
             phase,
+            glow,
+            slot,
             is_placed: false,
         }
     }
 
-    fn animate(&mut self, is_shown: bool, focus: Option<Rect>, frame: &FrameContext) {
+    fn animate(&mut self, is_shown: bool, anchor: OrbAnchor, frame: &FrameContext) {
         let delta_time = frame.delta_time;
-        let target = self.compute_target(focus, frame);
+        let target = self.compute_target(anchor, frame);
         self.phase += delta_time;
         self.visibility = approach(self.visibility, is_shown, delta_time);
         if !self.is_placed {
@@ -89,23 +119,19 @@ impl Orb {
         self.is_placed = self.visibility > MIN_VISIBILITY;
     }
 
-    fn compute_target(&self, focus: Option<Rect>, frame: &FrameContext) -> Point {
+    fn compute_target(&self, anchor: OrbAnchor, frame: &FrameContext) -> Point {
         let phase = self.phase * WANDER_SPEED;
         let wander = Vec2::new(
             phase.sin() + (phase * 0.37).cos() * 0.5,
             (phase * 1.3).cos() * 0.7,
         );
-        match focus {
-            Some(rect) => {
+        match anchor {
+            OrbAnchor::Focus(rect) => {
                 let extent = rect.width().min(rect.height());
-                let anchor = Point::new(rect.center().x, rect.y0 + extent * 0.5);
-                anchor + wander * extent * WANDER_RATIO
+                let center = Point::new(rect.center().x, rect.y0 + extent * 0.5);
+                center + wander * extent * WANDER_RATIO
             }
-            None => {
-                let visible = frame.visible;
-                let anchor = Point::new(visible.center().x, visible.y0 + visible.height() * 0.3);
-                anchor + wander * FREE_WANDER_PX / frame.zoom
-            }
+            OrbAnchor::Home(home) => home + wander * HOME_WANDER_PX * world_per_pixel(frame),
         }
     }
 }
@@ -123,7 +149,7 @@ pub fn draw_orb(scene: &mut Scene, orb: &Orb, frame: &FrameContext) {
     scene.draw_blurred_rounded_rect(
         Affine::IDENTITY,
         glow_rect,
-        ORB_GLOW.multiply_alpha(0.55 * alpha),
+        orb.glow.multiply_alpha(0.55 * alpha),
         glow_radius,
         GLOW_STD_DEV_PX * scale,
     );
@@ -131,7 +157,8 @@ pub fn draw_orb(scene: &mut Scene, orb: &Orb, frame: &FrameContext) {
     scene.stroke(
         &Stroke::new(1.5 * scale),
         Affine::IDENTITY,
-        ORB_GLOW.multiply_alpha(alpha * (1.0 - ring_progress) as f32),
+        orb.glow
+            .multiply_alpha(alpha * (1.0 - ring_progress) as f32),
         None,
         &Circle::new(center, RING_RADIUS_PX * scale * (1.0 + ring_progress * 1.6)),
     );
@@ -142,6 +169,27 @@ pub fn draw_orb(scene: &mut Scene, orb: &Orb, frame: &FrameContext) {
         None,
         &Circle::new(center, CORE_RADIUS_PX * scale * (0.9 + 0.1 * pulse)),
     );
+}
+
+fn compute_home_origin(repository: Option<&Repository>, frame: &FrameContext) -> Point {
+    let Some(repository) = repository else {
+        let margin = 2.0 * HOME_HEIGHT_PX * world_per_pixel(frame);
+        return Point::new(frame.visible.x0, frame.visible.y0 + margin);
+    };
+    let root = repository.node(repository.root_id());
+    Point::new(
+        root.rect.x0 + root.header_height * ROOT_LABEL_INSET_RATIO,
+        root.rect.y0,
+    )
+}
+
+fn compute_home(origin: Point, slot: usize, frame: &FrameContext) -> Point {
+    let offset = Vec2::new(HOME_SPACING_PX * (slot as f64 + 0.5), -HOME_HEIGHT_PX);
+    origin + offset * world_per_pixel(frame)
+}
+
+fn world_per_pixel(frame: &FrameContext) -> f64 {
+    frame.scale_factor / frame.zoom
 }
 
 fn check_is_shown(session: &AgentSession) -> bool {

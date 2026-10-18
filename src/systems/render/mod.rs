@@ -250,7 +250,11 @@ mod tests {
             for entry in &mut feed.entries {
                 entry.age_seconds = 5.0;
             }
-            let mut orb = crate::systems::render::orb::Orb::new(0.0);
+            let mut orb = crate::systems::render::orb::Orb::new(
+                0.0,
+                crate::systems::render::palette::ORB_GLOW,
+                0,
+            );
             orb.visibility = 1.0;
             orb.position = main_rect.center();
             crate::systems::render::orb::draw_orb(&mut scene, &orb, &frame);
