@@ -38,6 +38,25 @@ The user may iterate their blueprint/code at their preferred high-low level deta
 
 The living blueprint is available as a GUI natively for Linux, Mac and Windows.[^windows]
 
+### Install
+
+With Cargo:
+
+```sh
+cargo install living-blueprint
+```
+
+Prebuilt binaries for Linux and macOS are attached to each
+[GitHub release](https://github.com/rellfy/living-blueprint/releases).
+
+Then run it inside a Git repository, or pass the path to one:
+
+```sh
+living-blueprint [path]
+```
+
+Coding agent features require [Claude Code](https://github.com/anthropics/claude-code) (`claude`) on your `PATH`.
+
 ## Coding Agents
 
 Coding agents are shown in the map as floating orbs. They float around the areas that they are working with.
