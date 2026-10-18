@@ -1,5 +1,6 @@
 use crate::repository::{NodeId, Repository};
-use crate::resources::agent_session::AgentSession;
+use crate::resources::agent_feed::AgentFeed;
+use crate::resources::agent_sessions::AgentSessions;
 use crate::resources::camera::Camera;
 use crate::resources::clipboard::Clipboard;
 use crate::resources::pointer::Pointer;
@@ -7,6 +8,7 @@ use crate::resources::prompt::Prompt;
 use crate::resources::repository_sync::RepositorySync;
 use crate::resources::text::TextEngine;
 use crate::resources::wgpu::WgpuResource;
+use crate::systems::agent::state::AgentState;
 use crate::systems::agent::update_agent;
 use crate::systems::input::{
     handle_cursor_moved, handle_key, handle_mouse_button, handle_mouse_wheel, update_hover,
@@ -38,7 +40,9 @@ pub struct State {
     pub prompt: Prompt,
     pub clipboard: Clipboard,
     pub modifiers: ModifiersState,
-    pub agent_session: AgentSession,
+    pub agent_sessions: AgentSessions,
+    pub agent_feed: AgentFeed,
+    pub agent_state: AgentState,
     pub repository_root: PathBuf,
     pub repository: Option<Repository>,
     pub repository_sync: RepositorySync,
@@ -66,7 +70,9 @@ impl State {
             prompt: Prompt::new(),
             clipboard: Clipboard::new(),
             modifiers: ModifiersState::empty(),
-            agent_session: AgentSession::new(),
+            agent_sessions: AgentSessions::default(),
+            agent_feed: AgentFeed::default(),
+            agent_state: AgentState::new(&repository_root),
             repository_root,
             repository: None,
             repository_sync,

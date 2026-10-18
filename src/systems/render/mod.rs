@@ -2,7 +2,6 @@ use crate::State;
 use crate::systems::render::background::draw_background;
 use crate::systems::render::edges::{collect_linked_nodes, draw_edges};
 use crate::systems::render::map::MapPainter;
-use crate::systems::render::orb::draw_orb;
 use crate::systems::render::overlay::OverlayPainter;
 use crate::systems::render::palette::BACKGROUND;
 use vello::kurbo::{Affine, Rect, Size};
@@ -69,13 +68,16 @@ fn compose_scene(state: &mut State) {
         }
         .draw();
     }
-    draw_orb(&mut render_state.scene, &state.agent_session.orb, &frame);
+    render_state
+        .orbs
+        .update(&state.agent_sessions, state.repository.as_ref(), &frame);
+    render_state.orbs.draw(&mut render_state.scene, &frame);
     let mut overlay = OverlayPainter {
         scene: &mut render_state.scene,
         text_engine: &mut state.text_engine,
         frame: &frame,
     };
-    overlay.draw_feed(&mut state.agent_session.feed, &state.prompt);
+    overlay.draw_feed(&mut state.agent_feed, &state.prompt);
     overlay.draw_prompt(&mut state.prompt);
     let notice = match (&state.load_error, state.repository.is_none()) {
         (Some(error), _) => Some(error.clone()),
@@ -231,35 +233,33 @@ mod tests {
             prompt.move_caret(crate::resources::prompt::Motion::WordLeft, false);
             prompt.move_caret(crate::resources::prompt::Motion::WordLeft, true);
             prompt.visibility = 1.0;
-            let mut session = crate::resources::agent_session::AgentSession::new();
-            session.status = crate::resources::agent_session::AgentStatus::Working;
-            session.feed.push(
+            let mut feed = crate::resources::agent_feed::AgentFeed::default();
+            feed.push(
                 crate::resources::agent_feed::FeedKind::Prompt,
                 "explain the zoom levels",
             );
-            session.feed.push(
+            feed.push(
                 crate::resources::agent_feed::FeedKind::ToolUse,
                 "Read src/systems/render/map.rs",
             );
-            session.feed.push(
+            feed.push(
                 crate::resources::agent_feed::FeedKind::Message,
                 &"The map picks a level from the on-screen line height of each file. ".repeat(4),
             );
-            session
-                .feed
-                .push(crate::resources::agent_feed::FeedKind::Success, "done");
-            for entry in &mut session.feed.entries {
+            feed.push(crate::resources::agent_feed::FeedKind::Success, "done");
+            for entry in &mut feed.entries {
                 entry.age_seconds = 5.0;
             }
-            session.orb.visibility = 1.0;
-            session.orb.position = main_rect.center();
-            draw_orb(&mut scene, &session.orb, &frame);
+            let mut orb = crate::systems::render::orb::Orb::new(0.0);
+            orb.visibility = 1.0;
+            orb.position = main_rect.center();
+            crate::systems::render::orb::draw_orb(&mut scene, &orb, &frame);
             let mut overlay = OverlayPainter {
                 scene: &mut scene,
                 text_engine: &mut text_engine,
                 frame: &frame,
             };
-            overlay.draw_feed(&mut session.feed, &prompt);
+            overlay.draw_feed(&mut feed, &prompt);
             overlay.draw_prompt(&mut prompt);
             let params = RenderParams {
                 base_color: BACKGROUND,

@@ -1,5 +1,6 @@
 use crate::resources::wgpu::WgpuResource;
 use crate::systems::render::cache::RenderCache;
+use crate::systems::render::orb::Orbs;
 use std::num::NonZeroUsize;
 use vello::{AaSupport, Renderer, RendererOptions, Scene};
 use wgpu::util::TextureBlitter;
@@ -14,6 +15,7 @@ pub struct RenderState {
     pub target_view: TextureView,
     pub blitter: TextureBlitter,
     pub cache: RenderCache,
+    pub orbs: Orbs,
 }
 
 impl RenderState {
@@ -36,6 +38,7 @@ impl RenderState {
             target_view: create_target_view(device, config.width, config.height),
             blitter: TextureBlitter::new(device, config.format),
             cache: RenderCache::default(),
+            orbs: Orbs::default(),
         }
     }
 

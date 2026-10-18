@@ -1,5 +1,5 @@
 pub mod agent_feed;
-pub mod agent_session;
+pub mod agent_sessions;
 pub mod camera;
 pub mod clipboard;
 pub mod pointer;
