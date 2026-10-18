@@ -219,7 +219,76 @@ mod tests {
             .collect();
         assert_eq!(
             signatures,
-            vec!["class A", "run(): void", "const b = () => 1", "interface C"]
+            vec![
+                "class A",
+                "run(): void",
+                "const b = () => 1",
+                "interface C",
+                "d: number"
+            ]
+        );
+    }
+
+    fn outline_signatures(path: &str, source: &str) -> Vec<String> {
+        analyse(Path::new(path), source)
+            .unwrap()
+            .outline
+            .iter()
+            .map(|item| format!("{}{}", "  ".repeat(item.depth), item.signature))
+            .collect()
+    }
+
+    #[test]
+    fn rust_outline_lists_public_fields() {
+        let source = "pub struct A {\n    pub b: u8,\n    c: u8,\n    pub(crate) d: u8,\n}\n";
+        assert_eq!(
+            outline_signatures("a.rs", source),
+            vec!["pub struct A", "  pub b: u8", "  pub(crate) d: u8"]
+        );
+    }
+
+    #[test]
+    fn python_outline_lists_public_class_attributes() {
+        let source =
+            "X = 1\nclass A:\n    b: int = 1\n    _c: int\n    def d(self):\n        pass\n";
+        assert_eq!(
+            outline_signatures("a.py", source),
+            vec!["class A", "  b: int = 1", "  def d(self)"]
+        );
+    }
+
+    #[test]
+    fn typescript_outline_lists_public_fields() {
+        let source = "class A {\n  b: number = 1;\n  private c = 2;\n  #d = 3;\n  public e?: string;\n}\n\
+            interface I {\n  f: number;\n  g(): void;\n}\n";
+        assert_eq!(
+            outline_signatures("a.ts", source),
+            vec![
+                "class A",
+                "  b: number = 1",
+                "  public e?: string",
+                "interface I",
+                "  f: number",
+                "  g(): void"
+            ]
+        );
+    }
+
+    #[test]
+    fn javascript_outline_lists_public_fields() {
+        let source = "class A {\n  b = 1;\n  #c = 2;\n}\n";
+        assert_eq!(
+            outline_signatures("a.js", source),
+            vec!["class A", "  b = 1"]
+        );
+    }
+
+    #[test]
+    fn go_outline_lists_exported_fields() {
+        let source = "package a\ntype A struct {\n    B int\n    c string\n    D, E int\n}\n";
+        assert_eq!(
+            outline_signatures("a.go", source),
+            vec!["type A struct", "  B int", "  D, E int"]
         );
     }
 
